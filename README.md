@@ -78,7 +78,7 @@ A passing smoke check also reproduces three integration gaps:
 
 ## Next work
 
-1. Define tenant identity and authorization contracts shared by the services.
+1. Review the draft [integration contracts](specs/integration-contracts.md), then implement the AuthFortress tenant foundation.
 2. Make webhook admission and delivery idempotent and recoverable after broker or worker failures.
 3. Verify the Telegram → WebHook Manager → AgentHub → Telegram flow against those contracts.
 4. Connect the event and log pipelines, then build the dashboard and deployment setup.
