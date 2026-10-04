@@ -1,0 +1,158 @@
+version: '3.8'
+
+networks:
+  nexus_net:
+    driver: bridge
+
+volumes:
+  nexus_postgres_data:
+  nexus_redis_data:
+
+services:
+
+  #ЕДИНАЯ ИНФРА
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: nexus-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - nexus_postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "25432:5432"
+    networks:
+      - nexus_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexus-redis
+    restart: unless-stopped
+    ports:
+      - "26379:6379"
+    volumes:
+      - nexus_redis_data:/data
+    networks:
+      - nexus_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  #МИКРОСЕРВИС АВТОРИЗАЦИИ (AuthFortress)
+  auth_service:
+    build:
+      context: ../AuthFortress
+      dockerfile: Dockerfile
+    container_name: nexus-auth
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://\({POSTGRES_USER}:\){POSTGRES_PASSWORD}@postgres:5432/authfortress
+      REDIS_URL: redis://redis:6379/1
+      SECRET_KEY: ${AUTH_SECRET_KEY}
+    ports:
+      - "28080:8000"
+    networks:
+      - nexus_net
+
+
+  #ШЛЮЗ ВЕБХУКОВ (WebHook_Manager)
+  webhook_service:
+    build:
+      context: ../WebHook_Manager
+      dockerfile: Dockerfile
+    container_name: nexus-webhook-api
+    restart: unless-stopped
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://\({POSTGRES_USER}:\){POSTGRES_PASSWORD}@postgres:5432/webhook_manager
+      REDIS_URL: redis://redis:6379/2
+      CELERY_BROKER_URL: redis://redis:6379/2
+      SECRET_KEY: ${WEBHOOK_SECRET_KEY}
+    ports:
+      - "8001:8000"
+    networks:
+      - nexus_net
+
+  webhook_worker:
+    build:
+      context: ../WebHook_Manager
+      dockerfile: Dockerfile
+    container_name: nexus-webhook-worker
+    restart: unless-stopped
+    command: celery -A src.infrastructure.queue.celery_app worker --loglevel=info --concurrency=2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://\({POSTGRES_USER}:\){POSTGRES_PASSWORD}@postgres:5432/webhook_manager
+      REDIS_URL: redis://redis:6379/2
+      CELERY_BROKER_URL: redis://redis:6379/2
+      SECRET_KEY: ${WEBHOOK_SECRET_KEY}
+    networks:
+      - nexus_net
+
+
+  #ИИ-МОЗГ И RAG (AgentHub)
+  agent_service:
+    build:
+      context: ../AgentHub
+      dockerfile: Dockerfile
+    container_name: nexus-agent-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://\({POSTGRES_USER}:\){POSTGRES_PASSWORD}@postgres:5432/agenthub
+      REDIS_URL: redis://redis:6379/3
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      LLM_PROVIDER: groq
+      LLM_MODEL: llama-3.3-70b-versatile
+    ports:
+      - "8014:8000"
+    networks:
+      - nexus_net
+
+  agent_worker:
+    build:
+      context: ../AgentHub
+      dockerfile: Dockerfile
+    container_name: nexus-agent-worker
+    restart: unless-stopped
+    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://\({POSTGRES_USER}:\){POSTGRES_PASSWORD}@postgres:5432/agenthub
+      REDIS_URL: redis://redis:6379/3
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      LLM_PROVIDER: groq
+      LLM_MODEL: llama-3.3-70b-versatile
+    networks:
+      - nexus_net
