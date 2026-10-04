@@ -8,3 +8,11 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Local AI assistant working notes and verification artifacts
+AGENTS.md
+PROJECT-MAP.md
+/specs/service-verification.md
+/docs/authfortress-checkpoint.md
+/docs/service-verification-plan.md
+/docs/verification-*.md
