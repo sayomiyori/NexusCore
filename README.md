@@ -43,12 +43,16 @@ Install Docker Desktop with Compose, clone those repositories into the layout ab
 ```powershell
 Copy-Item .env.example .env
 # Edit .env and set local credentials before starting the services.
-docker compose config
-docker compose up -d --build
+docker compose config --quiet
+docker compose up -d --build --wait --wait-timeout 180
 docker compose ps
 ```
 
-The root stack exposes PostgreSQL on `localhost:25432`, Redis on `localhost:26379`, AuthFortress at `http://localhost:28080/docs`, WebHook Manager at `http://localhost:8001/docs`, and AgentHub at `http://localhost:8014/docs`. These ports and credentials are for local development. Do not expose this Compose setup as a production deployment.
+The root stack binds its published ports to `127.0.0.1`: PostgreSQL on `localhost:25432`, Redis on `localhost:26379`, AuthFortress at `http://localhost:28080/docs`, WebHook Manager at `http://localhost:8001/docs`, and AgentHub at `http://localhost:8014/docs`. These ports and credentials are for local development. Do not expose this Compose setup as a production deployment.
+
+Set both signing secrets to independent random values of at least 32 characters. Use URL-safe local database credentials because Compose interpolates them into connection URLs. Groq credentials are optional for startup and required for real generation. Without a Gemini key, AgentHub uses its existing deterministic fallback embeddings; these do not verify semantic retrieval quality.
+
+AuthFortress and WebHook Manager apply their existing forward Alembic migrations before starting their APIs. AgentHub uses its existing table creation on startup. Database initialization runs only when the PostgreSQL volume is first created. AgentHub API and worker share an uploads volume.
 
 For service-specific setup and tests, use the README in each service repository. EventPipe and PipeWatch are not started by the root Compose file.
 
@@ -57,6 +61,20 @@ For service-specific setup and tests, use the README in each service repository.
 As of 2026-10-04, isolated service suites reported 256 passing tests: AuthFortress 128, WebHook Manager 67, AgentHub 15, EventPipe 26, and PipeWatch 20. These checks cover individual services and local dependencies; they do not certify the integrated platform. EventPipe still reports 13 Ruff findings.
 
 Tenant isolation is not implemented across the platform. WebHook delivery recovery and egress restrictions remain open, and no public deployment or complete cross-service flow has been verified. Treat NexusCore as a development demo workspace, not a production-ready multi-tenant service.
+
+The root stack smoke check requires Python 3.12 or newer and the running Compose stack:
+
+```powershell
+python scripts/verify_stack.py
+```
+
+It verifies root API health, AuthFortress login/JWT/protected-route rejection paths, AgentHub upload/worker/storage, and signed synthetic ingress through the real WebHook Redis/Celery worker to a controlled local receiver. It creates and retains uniquely named demo records and performs no live Telegram or LLM calls. First API-key/source provisioning uses the existing repository layer inside the webhook container because public onboarding is incomplete.
+
+A passing smoke check also reproduces three integration gaps:
+
+- WebHook Manager requires its own API key and rejects an AuthFortress bearer JWT with 401.
+- Signed ingress requires `X-Webhook-Signature` HMAC; Telegram's secret-token header alone returns 401.
+- Delivery preserves the Telegram JSON fields, but AgentHub `/api/v1/query` requires `question` and returns 422 for that payload. Delivery does not send the generated answer to Telegram.
 
 ## Next work
 
