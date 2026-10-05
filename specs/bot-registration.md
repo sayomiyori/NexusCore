@@ -5,7 +5,11 @@ Implementation proceeds in the ordered acceptance steps below; approval does not
 establish that bot registration or downstream enforcement works.
 Step 1 is implemented and locally verified in AuthFortress: 190 tests passed,
 Ruff/Mypy, Docker build and HTTP service-status checks passed on 2026-10-05.
-Root Compose key forwarding and WebHook clients remain subsequent work.
+Step 2 clients/config and root Compose key forwarding are implemented and locally
+verified: 136 WebHook Manager tests passed (69 focused), Ruff/strict Mypy, Docker
+build and standalone HTTP/worker smoke passed; independent client review approved.
+Bot registry/API, context endpoint and registration quota remain subsequent work.
+Live Telegram and cross-service registration acceptance remain unverified.
 Parent contract: [integration-contracts.md](integration-contracts.md).
 
 ## Goal and implementation boundary
