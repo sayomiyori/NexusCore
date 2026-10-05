@@ -1,6 +1,11 @@
 # Bot registration and service context v1
 
-Status: Draft for review. Date: 2026-10-05. No implementation added.
+Status: Approved for implementation. Date: 2026-10-05.
+Implementation proceeds in the ordered acceptance steps below; approval does not
+establish that bot registration or downstream enforcement works.
+Step 1 is implemented and locally verified in AuthFortress: 190 tests passed,
+Ruff/Mypy, Docker build and HTTP service-status checks passed on 2026-10-05.
+Root Compose key forwarding and WebHook clients remain subsequent work.
 Parent contract: [integration-contracts.md](integration-contracts.md).
 
 ## Goal and implementation boundary
@@ -16,7 +21,7 @@ consumer is connected. A registration alone does not receive or process updates.
 Token rotation, reactivation, transfer, deletion, invitations, AI work and outgoing
 Telegram messages require subsequent contracts.
 
-## Inspected baseline
+## Inspected baseline before implementation
 
 - WebHook Manager `src/api/v1/dependencies/auth.py` authenticates standalone
   API keys and local users. Platform routes need a separate AuthFortress dependency.

@@ -231,8 +231,9 @@ ellipsis if longer. Empty generation is terminal and creates no outgoing reply.
 2. **Bot admission:** review exact bot/service API, encrypted credentials and
    migration; verify Telegram-token auth, canonical context, concurrent duplicate
    handling and publish/recovery across broker outage with boundary doubles.
-   Concrete first substep: [bot-registration.md](bot-registration.md), currently
-   a draft. Step 2a provides registry/service context; step 2b adds webhook
+   Concrete first substep: [bot-registration.md](bot-registration.md), approved
+   for implementation. AuthFortress service-status step is locally verified;
+   registry/service context remains pending. Step 2b adds webhook
    provisioning, durable ingress/outbox and recovery before AgentHub consumption.
 3. **AgentHub consumer:** scope storage/cache/retrieval/usage and migrate explicitly;
    verify forged tenant/bot pair rejection, cross-tenant conversation/document/cache
