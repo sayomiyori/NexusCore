@@ -8,8 +8,13 @@ Ruff/Mypy, Docker build and HTTP service-status checks passed on 2026-10-05.
 Step 2 clients/config and root Compose key forwarding are implemented and locally
 verified: 136 WebHook Manager tests passed (69 focused), Ruff/strict Mypy, Docker
 build and standalone HTTP/worker smoke passed; independent client review approved.
-Bot registry/API, context endpoint and registration quota remain subsequent work.
-Live Telegram and cross-service registration acceptance remain unverified.
+Bot registry/API, context endpoint and atomic registration quota are implemented.
+Local acceptance: 162 tests, 84.56% coverage, Ruff/strict Mypy, independent
+read-only review, isolated migration upgrade/down/upgrade/check and real HTTP
+AuthFortress JWT -> WebHook -> live Telegram getMe passed. Credentials are
+encrypted in PostgreSQL; tenant/RBAC/session failure paths deny access.
+Evidence: docs/verification-bot-registry-2026-10-05.md (local-only).
+Webhook provisioning, ingress/outbox, AI and Telegram answers remain unimplemented.
 Parent contract: [integration-contracts.md](integration-contracts.md).
 
 ## Goal and implementation boundary
