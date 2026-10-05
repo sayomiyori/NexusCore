@@ -60,6 +60,8 @@ For service-specific setup and tests, use the README in each service repository.
 
 As of 2026-10-04, isolated service suites reported 256 passing tests: AuthFortress 128, WebHook Manager 67, AgentHub 15, EventPipe 26, and PipeWatch 20. These checks cover individual services and local dependencies; they do not certify the integrated platform. EventPipe still reports 13 Ruff findings.
 
+On 2026-10-05, AuthFortress tenant creation, membership permissions and access isolation were verified through 43 tenant tests and the root HTTP service. Its complete regression suite passed 171 tests; Ruff and Mypy passed. Fresh migration upgrade, downgrade/upgrade and schema checks passed in a separate empty test database. Local evidence: `docs/verification-tenants-2026-10-05.md`.
+
 Tenant isolation is not implemented across the platform. WebHook delivery recovery and egress restrictions remain open, and no public deployment or complete cross-service flow has been verified. Treat NexusCore as a development demo workspace, not a production-ready multi-tenant service.
 
 The root stack smoke check requires Python 3.12 or newer and the running Compose stack:
@@ -78,7 +80,7 @@ A passing smoke check also reproduces three integration gaps:
 
 ## Next work
 
-1. Review the draft [integration contracts](specs/integration-contracts.md), then implement the AuthFortress tenant foundation.
+1. Specify bot admission and service authentication under the approved [integration contracts](specs/integration-contracts.md); the AuthFortress tenant foundation is implemented and verified.
 2. Make webhook admission and delivery idempotent and recoverable after broker or worker failures.
 3. Verify the Telegram → WebHook Manager → AgentHub → Telegram flow against those contracts.
 4. Connect the event and log pipelines, then build the dashboard and deployment setup.

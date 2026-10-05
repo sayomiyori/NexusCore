@@ -1,6 +1,8 @@
 # NexusCore integration contracts v1
 
-Status: Draft for review; not implemented. Date: 2026-10-04.
+Status: Approved by the user on 2026-10-05. AuthFortress tenant foundation is
+implemented; later integration stages remain planned. Created: 2026-10-04.
+Local verification evidence: `docs/verification-tenants-2026-10-05.md`.
 
 ## Goal and first implementation boundary
 
@@ -16,7 +18,7 @@ are later independently verified steps, not part of the first implementation.
 Invitations, owner transfer, billing, media, groups, topics, edited messages,
 dashboard, observability integration and deployment are outside v1 acceptance.
 
-## Observed baseline
+## Observed baseline before tenant implementation (2026-10-04)
 
 | Service | Existing implementation | Integration gap |
 |---|---|---|
