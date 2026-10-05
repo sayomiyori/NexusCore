@@ -216,7 +216,7 @@ ellipsis if longer. Empty generation is terminal and creates no outgoing reply.
 
 ## Acceptance and ordered follow-up
 
-1. **AuthFortress tenant foundation (next implementation):** tenant creation/list/
+1. **AuthFortress tenant foundation (implemented and verified):** tenant creation/list/
    read/authorize succeeds; two users cannot access each other's tenants by known
    UUID; owner/member permissions differ; one user may access two fixture-created
    memberships; global admin has no membership bypass; disabled membership/tenant
@@ -231,6 +231,9 @@ ellipsis if longer. Empty generation is terminal and creates no outgoing reply.
 2. **Bot admission:** review exact bot/service API, encrypted credentials and
    migration; verify Telegram-token auth, canonical context, concurrent duplicate
    handling and publish/recovery across broker outage with boundary doubles.
+   Concrete first substep: [bot-registration.md](bot-registration.md), currently
+   a draft. Step 2a provides registry/service context; step 2b adds webhook
+   provisioning, durable ingress/outbox and recovery before AgentHub consumption.
 3. **AgentHub consumer:** scope storage/cache/retrieval/usage and migrate explicitly;
    verify forged tenant/bot pair rejection, cross-tenant conversation/document/cache
    isolation, concurrent worker claims, result replay and provider unknown outcome.
