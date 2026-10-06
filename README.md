@@ -58,6 +58,32 @@ For service-specific setup and tests, use the README in each service repository.
 
 ## Verification status
 
+### Free AI providers
+
+Current Compose selects Groq and forwards `GROQ_API_KEY` to AgentHub. Groq API
+authentication/model availability and direct generation through Gemini
+`gemini-2.5-flash`, OpenRouter `liquid/lfm-2.5-2.6b:free` and Cloudflare Workers AI
+`@cf/meta/llama-3.2-3b-instruct` were checked on 2026-10-06. OpenRouter reported
+zero cost; the operator confirmed Gemini Free Tier and Workers Free.
+
+OpenRouter and Cloudflare have no AgentHub adapter yet. Their reserved root
+`.env` names are `OPENROUTER_TOKEN`, `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID`; Compose does not forward or activate them yet. Gemini's
+existing adapter uses `GEMINI_API_KEY` in standalone AgentHub.
+
+Stay on free accounts/models and keep paid fallback disabled.
+[OpenRouter Free](https://openrouter.ai/pricing) has a 50-request daily limit;
+[Workers Free](https://developers.cloudflare.com/workers-ai/platform/pricing/)
+provides 10,000 Neurons/day. [Gemini limits](https://ai.google.dev/gemini-api/docs/rate-limits)
+depend on project/model. Quota exhaustion must not trigger paid inference.
+Token-price estimates and actual billed cost are different measurements.
+
+The [approved AI/reply contract](specs/telegram-ai-reply.md) starts with Groq and
+durable scoped jobs. UI token onboarding is planned separately with tenant-scoped
+encryption and masked metadata. Direct probes do not prove Telegram -> AI -> reply.
+
+### Service and integration checks
+
 As of 2026-10-04, isolated service suites reported 256 passing tests: AuthFortress 128, WebHook Manager 67, AgentHub 15, EventPipe 26, and PipeWatch 20. These checks cover individual services and local dependencies; they do not certify the integrated platform. EventPipe still reports 13 Ruff findings.
 
 On 2026-10-05, AuthFortress tenant creation, membership permissions and access isolation were verified through 43 tenant tests and the root HTTP service. Its complete regression suite passed 171 tests; Ruff and Mypy passed. Fresh migration upgrade, downgrade/upgrade and schema checks passed in a separate empty test database. Local evidence: `docs/verification-tenants-2026-10-05.md`.
