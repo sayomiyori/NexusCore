@@ -62,7 +62,24 @@ As of 2026-10-04, isolated service suites reported 256 passing tests: AuthFortre
 
 On 2026-10-05, AuthFortress tenant creation, membership permissions and access isolation were verified through 43 tenant tests and the root HTTP service. Its complete regression suite passed 171 tests; Ruff and Mypy passed. Fresh migration upgrade, downgrade/upgrade and schema checks passed in a separate empty test database. Local evidence: `docs/verification-tenants-2026-10-05.md`.
 
-Tenant isolation is not implemented across the platform. WebHook delivery recovery and egress restrictions remain open, and no public deployment or complete cross-service flow has been verified. Treat NexusCore as a development demo workspace, not a production-ready multi-tenant service.
+On 2026-10-06, opt-in Telegram provisioning, authenticated intake and durable
+publication were verified in WebHook Manager: 238 tests passed, coverage 84.03%,
+Ruff/strict Mypy passed, and the migration roundtrip passed in a separate empty
+test database. Controlled Docker acceptance used real AuthFortress JWT/owner
+authorization, synthetic Telegram setup, Redis/Celery and a durable admission
+receiver. It covered admission during broker outage, scanner recovery and a lost
+receipt replay with one remote job. See [the intake contract](specs/telegram-ingress.md).
+
+The API requires `PLATFORM_TELEGRAM_ENABLED`, a public HTTPS
+`TELEGRAM_WEBHOOK_ORIGIN` and independent service keys. The optional
+`telegram-ingress` Compose profile starts the recovery scanner; workers/scanner
+do not receive the bot credential encryption key. Defaults remain disabled.
+AgentHub's matching consumer and Telegram answer delivery are still pending;
+enable live publication only after their contracts are implemented and verified.
+
+Tenant isolation is not implemented across the entire platform. Legacy webhook
+delivery recovery/egress restrictions, public deployment and the complete
+Telegram/AI/reply scenario remain open. NexusCore is a development demo workspace.
 
 The root stack smoke check requires Python 3.12 or newer and the running Compose stack:
 
@@ -72,7 +89,8 @@ python scripts/verify_stack.py
 
 It verifies root API health, AuthFortress login/JWT/protected-route rejection paths, AgentHub upload/worker/storage, and signed synthetic ingress through the real WebHook Redis/Celery worker to a controlled local receiver. It creates and retains uniquely named demo records and performs no live Telegram or LLM calls. First API-key/source provisioning uses the existing repository layer inside the webhook container because public onboarding is incomplete.
 
-A passing smoke check also reproduces three integration gaps:
+A passing root smoke still reproduces three gaps in the standalone route it uses
+(the opt-in platform intake has separate controlled acceptance):
 
 - WebHook Manager requires its own API key and rejects an AuthFortress bearer JWT with 401.
 - Signed ingress requires `X-Webhook-Signature` HMAC; Telegram's secret-token header alone returns 401.
@@ -80,7 +98,8 @@ A passing smoke check also reproduces three integration gaps:
 
 ## Next work
 
-1. Specify bot admission and service authentication under the approved [integration contracts](specs/integration-contracts.md); the AuthFortress tenant foundation is implemented and verified.
-2. Make webhook admission and delivery idempotent and recoverable after broker or worker failures.
-3. Verify the Telegram → WebHook Manager → AgentHub → Telegram flow against those contracts.
-4. Connect the event and log pipelines, then build the dashboard and deployment setup.
+1. Specify and implement AgentHub's idempotent Telegram admission consumer and
+   tenant/bot-aware AI execution under the [integration contracts](specs/integration-contracts.md).
+2. Implement durable answer delivery, then verify the live Telegram → AI → reply flow.
+3. Close legacy delivery recovery/egress restrictions and platform-wide isolation.
+4. Connect the event/log pipelines, dashboard and deployment setup.

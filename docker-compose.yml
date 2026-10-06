@@ -100,6 +100,11 @@ services:
       AUTHFORTRESS_WEBHOOK_SERVICE_KEY: ${AUTHFORTRESS_WEBHOOK_SERVICE_KEY:-}
       WEBHOOK_AGENT_CONTEXT_KEY: ${WEBHOOK_AGENT_CONTEXT_KEY:-}
       RATE_LIMIT_BOT_REGISTER: ${RATE_LIMIT_BOT_REGISTER:-10}
+      PLATFORM_TELEGRAM_ENABLED: ${PLATFORM_TELEGRAM_ENABLED:-false}
+      TELEGRAM_WEBHOOK_ORIGIN: ${TELEGRAM_WEBHOOK_ORIGIN:-}
+      AGENTHUB_BASE_URL: http://agent_service:8000
+      WEBHOOK_AGENT_INGRESS_KEY: ${WEBHOOK_AGENT_INGRESS_KEY:-}
+      PLATFORM_PUBLICATION_MAX_ATTEMPTS: ${PLATFORM_PUBLICATION_MAX_ATTEMPTS:-10}
     ports:
       - "127.0.0.1:8001:8000"
     healthcheck:
@@ -129,6 +134,38 @@ services:
       REDIS_URL: redis://redis:6379/2
       CELERY_BROKER_URL: redis://redis:6379/2
       SECRET_KEY: ${WEBHOOK_SECRET_KEY:?Set WEBHOOK_SECRET_KEY}
+      PLATFORM_BOTS_ENABLED: "false"
+      PLATFORM_TELEGRAM_ENABLED: "false"
+      AUTHFORTRESS_BASE_URL: http://auth_service:8000
+      AUTHFORTRESS_WEBHOOK_SERVICE_KEY: ${AUTHFORTRESS_WEBHOOK_SERVICE_KEY:-}
+      AGENTHUB_BASE_URL: http://agent_service:8000
+      WEBHOOK_AGENT_INGRESS_KEY: ${WEBHOOK_AGENT_INGRESS_KEY:-}
+      PLATFORM_PUBLICATION_MAX_ATTEMPTS: ${PLATFORM_PUBLICATION_MAX_ATTEMPTS:-10}
+    networks:
+      - nexus_net
+
+  webhook_outbox_recovery:
+    profiles: [telegram-ingress]
+    build:
+      context: ../WebHook_Manager
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: python -m scripts.recover_platform_outbox
+    depends_on:
+      webhook_service:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/webhook_manager
+      REDIS_URL: redis://redis:6379/2
+      CELERY_BROKER_URL: redis://redis:6379/2
+      SECRET_KEY: ${WEBHOOK_SECRET_KEY:?Set WEBHOOK_SECRET_KEY}
+      PLATFORM_BOTS_ENABLED: "false"
+      PLATFORM_TELEGRAM_ENABLED: "false"
+      AUTHFORTRESS_BASE_URL: http://auth_service:8000
+      AUTHFORTRESS_WEBHOOK_SERVICE_KEY: ${AUTHFORTRESS_WEBHOOK_SERVICE_KEY:-}
+      AGENTHUB_BASE_URL: http://agent_service:8000
+      WEBHOOK_AGENT_INGRESS_KEY: ${WEBHOOK_AGENT_INGRESS_KEY:-}
+      PLATFORM_PUBLICATION_MAX_ATTEMPTS: ${PLATFORM_PUBLICATION_MAX_ATTEMPTS:-10}
     networks:
       - nexus_net
 
