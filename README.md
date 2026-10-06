@@ -52,7 +52,7 @@ The root stack binds its published ports to `127.0.0.1`: PostgreSQL on `localhos
 
 Set both signing secrets to independent random values of at least 32 characters. Use URL-safe local database credentials because Compose interpolates them into connection URLs. Groq credentials are optional for startup and required for real generation. Without a Gemini key, AgentHub uses its existing deterministic fallback embeddings; these do not verify semantic retrieval quality.
 
-AuthFortress and WebHook Manager apply their existing forward Alembic migrations before starting their APIs. AgentHub uses its existing table creation on startup. Database initialization runs only when the PostgreSQL volume is first created. AgentHub API and worker share an uploads volume.
+AuthFortress and WebHook Manager apply their existing forward Alembic migrations before starting their APIs. AgentHub keeps legacy table creation for standalone startup; its opt-in Telegram mode requires an explicitly migrated platform schema. Database initialization runs only when the PostgreSQL volume is first created. AgentHub API and worker share an uploads volume.
 
 For service-specific setup and tests, use the README in each service repository. EventPipe and PipeWatch are not started by the root Compose file.
 
@@ -100,8 +100,13 @@ The API requires `PLATFORM_TELEGRAM_ENABLED`, a public HTTPS
 `TELEGRAM_WEBHOOK_ORIGIN` and independent service keys. The optional
 `telegram-ingress` Compose profile starts the recovery scanner; workers/scanner
 do not receive the bot credential encryption key. Defaults remain disabled.
-AgentHub's matching consumer and Telegram answer delivery are still pending;
-enable live publication only after their contracts are implemented and verified.
+AgentHub's matching signed admission endpoint was verified on 2026-10-06:
+79 tests passed; controlled built-image HTTP checks covered signature rejection,
+202/200/409 receipts, durable PostgreSQL storage and UUID-only Redis notifications.
+The bot-context HTTP boundary used synthetic data. Platform AI processing,
+recovery scanners and Telegram answer delivery remain pending; root Compose does
+not yet enable the new AgentHub mode. Enable live publication only after the
+remaining contracts are implemented and verified.
 
 Tenant isolation is not implemented across the entire platform. Legacy webhook
 delivery recovery/egress restrictions, public deployment and the complete
@@ -124,8 +129,8 @@ A passing root smoke still reproduces three gaps in the standalone route it uses
 
 ## Next work
 
-1. Specify and implement AgentHub's idempotent Telegram admission consumer and
-   tenant/bot-aware AI execution under the [integration contracts](specs/integration-contracts.md).
+1. Implement bounded Groq generation and durable tenant/bot-aware processing
+   with recovery under the [AI/reply contract](specs/telegram-ai-reply.md).
 2. Implement durable answer delivery, then verify the live Telegram → AI → reply flow.
 3. Close legacy delivery recovery/egress restrictions and platform-wide isolation.
 4. Connect the event/log pipelines, dashboard and deployment setup.
