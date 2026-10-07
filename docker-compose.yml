@@ -105,6 +105,8 @@ services:
       AGENTHUB_BASE_URL: http://agent_service:8000
       WEBHOOK_AGENT_INGRESS_KEY: ${WEBHOOK_AGENT_INGRESS_KEY:-}
       PLATFORM_PUBLICATION_MAX_ATTEMPTS: ${PLATFORM_PUBLICATION_MAX_ATTEMPTS:-10}
+      TELEGRAM_REPLIES_ENABLED: ${TELEGRAM_REPLIES_ENABLED:-false}
+      AGENT_WEBHOOK_REPLY_KEY: ${AGENT_WEBHOOK_REPLY_KEY:-}
     ports:
       - "127.0.0.1:8001:8000"
     healthcheck:
@@ -145,7 +147,7 @@ services:
       - nexus_net
 
   webhook_outbox_recovery:
-    profiles: [telegram-ingress]
+    profiles: [telegram-ingress, telegram-ai]
     build:
       context: ../WebHook_Manager
       dockerfile: Dockerfile
@@ -182,12 +184,19 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    environment:
+    environment: &agent_platform_environment
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/agenthub
       REDIS_URL: redis://redis:6379/3
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       LLM_PROVIDER: groq
       LLM_MODEL: llama-3.3-70b-versatile
+      TELEGRAM_AI_ENABLED: ${TELEGRAM_AI_ENABLED:-false}
+      TELEGRAM_AI_PROVIDER: groq
+      TELEGRAM_AI_MODEL: ${TELEGRAM_AI_MODEL:-openai/gpt-oss-20b}
+      WEBHOOK_AGENT_INGRESS_KEY: ${WEBHOOK_AGENT_INGRESS_KEY:-}
+      WEBHOOK_INTERNAL_URL: http://webhook_service:8000
+      WEBHOOK_AGENT_SERVICE_KEY: ${WEBHOOK_AGENT_CONTEXT_KEY:-}
+      AGENT_WEBHOOK_REPLY_KEY: ${AGENT_WEBHOOK_REPLY_KEY:-}
     ports:
       - "127.0.0.1:8014:8000"
     healthcheck:
@@ -224,3 +233,88 @@ services:
       - nexus_agent_uploads:/app/uploads
     networks:
       - nexus_net
+
+  agent_telegram_worker:
+    profiles: [telegram-ai]
+    build: &agent_platform_build
+      context: ../AgentHub
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A app.workers.telegram_worker:celery_app worker --loglevel=info --concurrency=2 --queues=telegram_ai
+    depends_on: &agent_platform_dependencies
+      agent_service:
+        condition: service_healthy
+      webhook_service:
+        condition: service_healthy
+    environment: *agent_platform_environment
+    networks: [nexus_net]
+
+  agent_telegram_recovery:
+    profiles: [telegram-ai]
+    build: *agent_platform_build
+    restart: unless-stopped
+    command: python -m scripts.recover_telegram_jobs
+    depends_on: *agent_platform_dependencies
+    environment:
+      <<: *agent_platform_environment
+      GROQ_API_KEY: ""
+    networks: [nexus_net]
+
+  agent_reply_worker:
+    profiles: [telegram-ai]
+    build: *agent_platform_build
+    restart: unless-stopped
+    command: celery -A app.workers.telegram_reply_worker:celery_app worker --loglevel=info --concurrency=2 --queues=telegram_replies
+    depends_on: *agent_platform_dependencies
+    environment:
+      <<: *agent_platform_environment
+      GROQ_API_KEY: ""
+    networks: [nexus_net]
+
+  agent_reply_recovery:
+    profiles: [telegram-ai]
+    build: *agent_platform_build
+    restart: unless-stopped
+    command: python -m scripts.recover_telegram_replies
+    depends_on: *agent_platform_dependencies
+    environment:
+      <<: *agent_platform_environment
+      GROQ_API_KEY: ""
+    networks: [nexus_net]
+
+  webhook_sender:
+    profiles: [telegram-ai]
+    build: &webhook_sender_build
+      context: ../WebHook_Manager
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A src.infrastructure.queue.celery_app:celery_app worker --loglevel=info --concurrency=2 --queues=telegram_send
+    depends_on: &webhook_sender_dependencies
+      webhook_service:
+        condition: service_healthy
+    environment: &webhook_sender_environment
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/webhook_manager
+      REDIS_URL: redis://redis:6379/2
+      CELERY_BROKER_URL: redis://redis:6379/2
+      SECRET_KEY: ${WEBHOOK_SECRET_KEY:?Set WEBHOOK_SECRET_KEY}
+      PLATFORM_BOTS_ENABLED: ${PLATFORM_BOTS_ENABLED:-false}
+      PLATFORM_TELEGRAM_ENABLED: ${PLATFORM_TELEGRAM_ENABLED:-false}
+      TELEGRAM_REPLIES_ENABLED: ${TELEGRAM_REPLIES_ENABLED:-false}
+      AUTHFORTRESS_BASE_URL: http://auth_service:8000
+      AUTHFORTRESS_WEBHOOK_SERVICE_KEY: ${AUTHFORTRESS_WEBHOOK_SERVICE_KEY:-}
+      WEBHOOK_AGENT_CONTEXT_KEY: ${WEBHOOK_AGENT_CONTEXT_KEY:-}
+      WEBHOOK_AGENT_INGRESS_KEY: ${WEBHOOK_AGENT_INGRESS_KEY:-}
+      AGENT_WEBHOOK_REPLY_KEY: ${AGENT_WEBHOOK_REPLY_KEY:-}
+      BOT_CREDENTIALS_KEY: ${BOT_CREDENTIALS_KEY:-}
+      TELEGRAM_WEBHOOK_ORIGIN: ${TELEGRAM_WEBHOOK_ORIGIN:-}
+      AGENTHUB_BASE_URL: http://agent_service:8000
+    networks: [nexus_net]
+
+  webhook_send_recovery:
+    profiles: [telegram-ai]
+    build: *webhook_sender_build
+    restart: unless-stopped
+    command: python -m scripts.recover_telegram_answers
+    depends_on: *webhook_sender_dependencies
+    environment: *webhook_sender_environment
+    networks: [nexus_net]

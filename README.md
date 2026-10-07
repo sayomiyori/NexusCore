@@ -103,10 +103,53 @@ do not receive the bot credential encryption key. Defaults remain disabled.
 AgentHub's matching signed admission endpoint was verified on 2026-10-06:
 79 tests passed; controlled built-image HTTP checks covered signature rejection,
 202/200/409 receipts, durable PostgreSQL storage and UUID-only Redis notifications.
-The bot-context HTTP boundary used synthetic data. Platform AI processing,
-recovery scanners and Telegram answer delivery remain pending; root Compose does
-not yet enable the new AgentHub mode. Enable live publication only after the
-remaining contracts are implemented and verified.
+The bot-context HTTP boundary used synthetic data. Durable AI processing, signed
+answers and Telegram sending are now implemented in the sibling services;
+controlled acceptance does not prove live delivery. The `telegram-ai` profile
+adds dedicated generation/reply/send workers and independent recovery scanners.
+All platform flags remain disabled by default.
+
+Enable `PLATFORM_BOTS_ENABLED`, `PLATFORM_TELEGRAM_ENABLED`,
+`TELEGRAM_AI_ENABLED` and `TELEGRAM_REPLIES_ENABLED` only with a public HTTPS
+webhook origin, bot credential encryption key, Groq credentials/model and
+independent issuer/context/ingress/reply keys. AgentHub receives no Telegram
+credential encryption key. Platform workers consume dedicated `telegram_ai`,
+`telegram_replies` and `telegram_send` queues; legacy workers keep their queues.
+
+AgentHub requires platform Alembic head before enabled startup. For a fresh empty
+AgentHub database, run `docker compose run --rm --no-deps agent_service python -m alembic upgrade head`
+after the database exists. An existing legacy database first
+requires comparison against the explicit legacy baseline and an approved baseline
+procedure; do not blindly stamp or upgrade it. Root Compose does not assign a
+baseline revision to existing data. WebHook Manager applies forward migrations
+before API startup.
+
+Validate with `docker compose --profile telegram-ai config --quiet`; after the
+schema prerequisite and separately approved live provisioning, start with
+`docker compose --profile telegram-ai up -d --build --wait`. Controlled tests
+alone do not authorize live publication.
+
+For isolated controlled acceptance, use WebHook Manager's existing virtualenv
+and `TEST_DATABASE_URL` pointing to dedicated local PostgreSQL/pgvector test
+infrastructure (database name ending `_test`):
+
+```powershell
+../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_telegram_ai.py --webhook-image webhook-task7-canonical --agent-image agenthub-task8-check
+```
+
+The script creates and retains fresh test databases, uses real issuer JWT/context
+and built service APIs/Celery/scanners, and intercepts only synthetic Telegram and
+Groq HTTP effects. It checks broker outage, lost admission receipt, one result/
+usage/send, duplicate/conflict rejection, deactivation and legacy table isolation.
+It reads no live credentials and makes no real Telegram setup/inference calls.
+
+On 2026-10-07, this full controlled chain and the reused standalone stack smoke
+passed, including document upload/embedding storage and legacy webhook delivery.
+AgentHub's complete regression passed 177 tests; WebHook Manager passed 311 tests
+with 84.90% coverage. Both migration heads were verified in fresh databases;
+the new WebHook migration roundtrip passed in a separately approved empty test
+database. Fresh read-only adversarial/security review approved the integration.
+Existing root data has not been migrated or reconfigured for live AI delivery.
 
 Tenant isolation is not implemented across the entire platform. Legacy webhook
 delivery recovery/egress restrictions, public deployment and the complete
@@ -129,8 +172,7 @@ A passing root smoke still reproduces three gaps in the standalone route it uses
 
 ## Next work
 
-1. Implement bounded Groq generation and durable tenant/bot-aware processing
-   with recovery under the [AI/reply contract](specs/telegram-ai-reply.md).
-2. Implement durable answer delivery, then verify the live Telegram → AI → reply flow.
-3. Close legacy delivery recovery/egress restrictions and platform-wide isolation.
-4. Connect the event/log pipelines, dashboard and deployment setup.
+1. Prepare the existing root schema and verify the specifically approved live
+   Telegram → AI → reply flow under the [AI/reply contract](specs/telegram-ai-reply.md).
+2. Close legacy delivery recovery/egress restrictions and platform-wide isolation.
+3. Connect the event/log pipelines, dashboard and deployment setup.
