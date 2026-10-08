@@ -117,6 +117,7 @@ def wait_for(check, seconds=60):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--webhook-image", default="webhook-task7-canonical")
+    parser.add_argument("--auth-image", default="authfortress-internal-status:verification")
     parser.add_argument("--agent-image", default="agenthub-task8-check")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
@@ -319,7 +320,7 @@ def main():
         # The existing identity image has the independently verified tenant endpoint.
         container(
             "auth",
-            "authfortress-internal-status:verification",
+            args.auth_image,
             [
                 "uvicorn",
                 "app.main:app",

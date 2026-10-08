@@ -188,8 +188,8 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/agenthub
       REDIS_URL: redis://redis:6379/3
       GROQ_API_KEY: ${GROQ_API_KEY:-}
-      LLM_PROVIDER: groq
-      LLM_MODEL: llama-3.3-70b-versatile
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      LLM_MODEL: ${LLM_MODEL:-llama-3.3-70b-versatile}
       TELEGRAM_AI_ENABLED: ${TELEGRAM_AI_ENABLED:-false}
       PLATFORM_READ_ENABLED: ${PLATFORM_READ_ENABLED:-false}
       AUTHFORTRESS_BASE_URL: http://auth_service:8000
@@ -229,8 +229,8 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/agenthub
       REDIS_URL: redis://redis:6379/3
       GROQ_API_KEY: ${GROQ_API_KEY:-}
-      LLM_PROVIDER: groq
-      LLM_MODEL: llama-3.3-70b-versatile
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      LLM_MODEL: ${LLM_MODEL:-llama-3.3-70b-versatile}
     volumes:
       - nexus_agent_uploads:/app/uploads
     networks:

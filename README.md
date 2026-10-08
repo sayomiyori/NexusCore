@@ -58,9 +58,23 @@ For service-specific setup and tests, use the README in each service repository.
 
 ## Verification status
 
+### Current module checkpoint — 2026-10-09
+
+All five service suites passed: **814 tests** in total (AuthFortress 192,
+WebHook Manager 320, AgentHub 250, EventPipe 27, PipeWatch 25). Full configured
+Ruff checks and applicable CI Mypy scopes passed. Fresh independent reviews
+approved the scoped fixes after regression tests. The rebuilt local API/worker
+stack, controlled Telegram/AI/reply chain and restricted nginx edge passed.
+
+See [commands, performance measurements and remaining boundaries](docs/module-verification-2026-10-09.md).
+The checkpoint covers current modules; it does not establish public deployment,
+tenant-safe legacy RAG, observability integration or exactly-once legacy delivery.
+
 ### Free AI providers
 
-Current Compose selects Groq and forwards `GROQ_API_KEY` to AgentHub. Groq API
+Current Compose defaults to Groq and forwards `GROQ_API_KEY` to AgentHub.
+`LLM_PROVIDER` and `LLM_MODEL` configure the standalone API and worker together;
+the opt-in Telegram path retains its separate `TELEGRAM_AI_MODEL`. Groq API
 authentication/model availability and direct generation through Gemini
 `gemini-2.5-flash`, OpenRouter `liquid/lfm-2.5-2.6b:free` and Cloudflare Workers AI
 `@cf/meta/llama-3.2-3b-instruct` were checked on 2026-10-06. OpenRouter reported
