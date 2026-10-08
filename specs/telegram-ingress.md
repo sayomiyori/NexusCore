@@ -74,6 +74,15 @@ Encrypt a purpose-tagged payload bound to tenant and bot with the configured
 Fernet key; store SHA256(secret) for constant-time incoming verification.
 Persist the secret and configuring state before the external request. v1 has no
 secret rotation, URL replacement, deleteWebhook or drop_pending_updates operation.
+An additive update on 2026-10-08 introduces optional strict boolean
+`replace_url=false`: when true, dry-run/apply select the current operator-configured
+origin instead of the stored URL. Apply updates the target under the existing
+per-bot claim and preserves the encrypted secret/digest. Concurrent claims return
+409; an already configured identical target is a no-op. Definite/ambiguous failure
+retains the attempted target as failed/unknown for ordinary retry. Default requests
+retain v1 semantics. No arbitrary request URL, secret rotation, deleteWebhook or
+pending-update deletion is introduced. Configuring/unknown still authenticate the
+preserved secret; a failed setup rejects intake with 403 until retried.
 Concurrent setup requests are serialized with a database claim, returning 409
 while a claim is live. Claim expiry is 60 seconds and uses database time.
 

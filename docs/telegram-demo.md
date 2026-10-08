@@ -106,11 +106,39 @@ the new URL replaces that bot's current Telegram destination. Present the exact
 new destination and successful dry-run for approval, as required by
 `specs/telegram-ai-reply.md`. A dry-run does not authorize `setWebhook`.
 
-The local webhook record retains its original URL after provisioning. The current
-API has no URL replacement/secret rotation workflow, so do not provision against
-an unreliable short-lived origin and assume a later tunnel URL can be swapped
-by repeating the same request. Live AI/reply acceptance also needs its reviewed
-worker configuration, bounded inference/send limits and a human test message.
+The local webhook record retains its original URL with ordinary requests. The
+updated WebHook Manager API accepts optional `replace_url: true` in both dry-run
+and apply to move to the current operator-configured origin. It preserves the
+secret, rejects concurrent setup and does not repeat an already configured target.
+A failed/ambiguous replacement retains the new target for ordinary retry. Intake
+continues checking the preserved secret during configuring/unknown; a definite
+failure blocks intake with 403 until retried. Pending updates are not explicitly
+dropped. The adopted local API/worker image was updated on 2026-10-08, retaining
+its previously tested dependencies. Other deployments need the updated service
+image before using this field. Live AI/reply acceptance also needs its
+reviewed worker configuration, bounded inference/send limits and a human message.
+
+Local replacement verification: owner login and `dry_run=true, replace_url=true`
+returned 200 with the exact reserved example origin; no bearer returned 401 and
+a non-boolean replacement flag returned 422. The webhook row count remained zero.
+After restoring disabled flags, all three root API health endpoints returned 200.
+The service suite passed 316 tests (84.94% coverage), Ruff and strict mypy; the
+11 provisioning tests also passed inside the deployed image with disposable
+PostgreSQL/Redis. No real `setWebhook` or message delivery was attempted.
+
+## Continuous operation
+
+A local computer and a Quick Tunnel cannot provide continuous public service:
+sleep, shutdown, network loss and changing origins interrupt delivery. The current
+setup remains a local development environment until a host and domain are supplied.
+Do not enable live AI workers indefinitely merely to hide these interruptions.
+
+For the future persistent deployment, use an always-on host and a stable HTTPS
+hostname, retain PostgreSQL/Redis data, configure restart policies and TLS renewal,
+and verify backup restoration and recovery after a reboot/network outage. The
+domain can point to a direct reverse proxy or an explicitly configured named
+tunnel. Choose and verify this when the actual VPS/domain are available; a named
+tunnel on a sleeping desktop does not solve host availability.
 
 ## Close preparation
 
