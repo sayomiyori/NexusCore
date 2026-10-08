@@ -166,11 +166,12 @@ copies before root writes. Legacy data, sequence state, ownership and privileges
 were preserved. The four AgentHub/WebHook application processes now use the
 verified images; API health and legacy worker pongs passed. AI/intake/reply flags
 remain disabled; no root live AI flow was enabled. On the verified local host,
-restart uses the retained `.venv/root-adoption.compose.yml` override (not tracked)
-to pin images and disabled flags:
+restart uses the retained `.venv/root-adoption.compose.yml` and
+`.venv/root-auth-update.compose.yml` overrides (not tracked) to pin the verified
+images and disabled flags:
 
 ```powershell
-docker compose -f docker-compose.yml -f .venv/root-adoption.compose.yml up -d --no-build --no-deps agent_service agent_worker webhook_service webhook_worker
+docker compose -f docker-compose.yml -f .venv/root-adoption.compose.yml -f .venv/root-auth-update.compose.yml up -d --no-build --no-deps agent_service agent_worker webhook_service webhook_worker
 ```
 
 This command describes that host's deployment, not a fresh-clone setup. Do not
@@ -196,6 +197,11 @@ A passing root smoke still reproduces three gaps in the standalone route it uses
 - Delivery preserves the Telegram JSON fields, but AgentHub `/api/v1/query` requires `question` and returns 422 for that payload. Delivery does not send the generated answer to Telegram.
 
 ## Next work
+
+The optional [Telegram demo edge](docs/telegram-demo.md) provides a restricted
+Cloudflare origin for one registered bot. It includes an isolated nginx acceptance
+check and explicit preparation/cleanup instructions. It does not install a
+webhook or enable the root AI flow.
 
 1. Define a separately approved root opt-in acceptance before enabling the
    verified [AI/reply flow](specs/telegram-ai-reply.md) there; schema adoption is complete.

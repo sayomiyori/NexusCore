@@ -1,0 +1,46 @@
+# Explicit opt-in overlay. This does not enable application flags or setWebhook.
+services:
+  telegram_edge:
+    image: nginx:1.30.5-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "/opt/telegram-edge/start.sh"]
+    command: ["nginx", "-g", "daemon off;"]
+    environment:
+      TELEGRAM_DEMO_BOT_ID: ${TELEGRAM_DEMO_BOT_ID:?Set the registered bot UUID}
+      NGINX_ENVSUBST_FILTER: ^TELEGRAM_DEMO_BOT_ID$
+      NGINX_ENTRYPOINT_QUIET_LOGS: "1"
+    volumes:
+      - ./deploy/telegram-demo/start.sh:/opt/telegram-edge/start.sh:ro
+      - ./deploy/telegram-demo/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    read_only: true
+    tmpfs:
+      - /etc/nginx/conf.d
+      - /var/cache/nginx
+      - /var/run
+    security_opt: ["no-new-privileges:true"]
+    networks: [nexus_net, telegram_edge]
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+
+  telegram_tunnel:
+    # Verified local cloudflared 2026.10.0; pin the registry digest.
+    image: cloudflare/cloudflared@sha256:9b49eed8f62806d5d45ddf59ecefb5710429598ea6d3fcccd2af938f621b2b07
+    profiles: [telegram-tunnel]
+    restart: "no"
+    command: ["tunnel", "--no-autoupdate", "--protocol", "http2", "--url", "http://telegram_edge:8080"]
+    depends_on:
+      telegram_edge:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [telegram_edge]
+
+networks:
+  nexus_net:
+    driver: bridge
+  telegram_edge:
+    driver: bridge
