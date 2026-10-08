@@ -207,3 +207,9 @@ webhook or enable the root AI flow.
    verified [AI/reply flow](specs/telegram-ai-reply.md) there; schema adoption is complete.
 2. Close legacy delivery recovery/egress restrictions and platform-wide isolation.
 3. Connect the event/log pipelines, dashboard and deployment setup.
+
+The first platform read increment is implemented in AgentHub:
+[tenant-authorized AI job metadata and usage](specs/platform-ai-read.md).
+It uses fresh AuthFortress and bot-context checks and excludes private message
+content. `PLATFORM_READ_ENABLED` stays false by default; tenant RAG, cache and
+AI configuration remain separate work.
