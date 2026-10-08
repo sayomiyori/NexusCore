@@ -24,7 +24,7 @@ Telegram → WebHook Manager → Celery / Redis → AgentHub → Telegram
            AuthFortress identity
 ```
 
-EventPipe and PipeWatch provide separate event and log pipelines. The diagram describes the target architecture; the complete Telegram-to-Telegram flow and shared identity integration have not been verified end to end.
+EventPipe and PipeWatch provide separate event and log pipelines. The opt-in Telegram → Groq → Telegram path was verified in an isolated live demo on 2026-10-08. Platform-wide identity enforcement and the event/log integration remain incomplete.
 
 ## Local development
 
@@ -149,11 +149,36 @@ AgentHub's complete regression passed 177 tests; WebHook Manager passed 311 test
 with 84.90% coverage. Both migration heads were verified in fresh databases;
 the new WebHook migration roundtrip passed in a separately approved empty test
 database. Fresh read-only adversarial/security review approved the integration.
-Existing root data has not been migrated or reconfigured for live AI delivery.
+At that checkpoint, existing root data had not been migrated for live AI delivery.
+
+On 2026-10-08, a separately approved live run used real Telegram intake, native
+workers/scanners and Groq `openai/gpt-oss-20b`. Exactly one scoped job, usage
+record, published reply and successful Telegram delivery were confirmed.
+Generation, publication and sending each took one attempt. The public intake
+closed after admission; Telegram
+reported no pending updates. Independent read-only review confirmed the result.
+This verifies one guarded demo flow, not production readiness or billed cost.
+
+On 2026-10-08, the existing local root databases were adopted under a separately
+approved procedure: AgentHub is at `002_telegram_ai` and WebHook Manager at
+`3cc3bb772105`. Fresh encrypted backups were restored and migrated on isolated
+copies before root writes. Legacy data, sequence state, ownership and privileges
+were preserved. The four AgentHub/WebHook application processes now use the
+verified images; API health and legacy worker pongs passed. AI/intake/reply flags
+remain disabled; no root live AI flow was enabled. On the verified local host,
+restart uses the retained `.venv/root-adoption.compose.yml` override (not tracked)
+to pin images and disabled flags:
+
+```powershell
+docker compose -f docker-compose.yml -f .venv/root-adoption.compose.yml up -d --no-build --no-deps agent_service agent_worker webhook_service webhook_worker
+```
+
+This command describes that host's deployment, not a fresh-clone setup. Do not
+restart its old WebHook images against the new migration revision.
 
 Tenant isolation is not implemented across the entire platform. Legacy webhook
-delivery recovery/egress restrictions, public deployment and the complete
-Telegram/AI/reply scenario remain open. NexusCore is a development demo workspace.
+delivery recovery/egress restrictions and public deployment remain open.
+NexusCore is a development demo workspace.
 
 The root stack smoke check requires Python 3.12 or newer and the running Compose stack:
 
@@ -172,7 +197,7 @@ A passing root smoke still reproduces three gaps in the standalone route it uses
 
 ## Next work
 
-1. Prepare the existing root schema and verify the specifically approved live
-   Telegram → AI → reply flow under the [AI/reply contract](specs/telegram-ai-reply.md).
+1. Define a separately approved root opt-in acceptance before enabling the
+   verified [AI/reply flow](specs/telegram-ai-reply.md) there; schema adoption is complete.
 2. Close legacy delivery recovery/egress restrictions and platform-wide isolation.
 3. Connect the event/log pipelines, dashboard and deployment setup.
