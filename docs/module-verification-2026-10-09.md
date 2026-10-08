@@ -18,6 +18,24 @@ Total: 814 tests. Timings are individual local runs, not load/capacity promises.
 There are upstream deprecation warnings in AuthFortress, WebHook Manager,
 AgentHub and PipeWatch. No test was skipped in the final EventPipe suite.
 
+## Post-push GitHub Actions
+
+- AuthFortress `9babd80`: CI run `37849265727` passed, including Docker build.
+- WebHook Manager `48919e1`: CI `37849270738` and image publication
+  `37849270749` passed. This CD workflow does not deploy a VPS.
+- AgentHub `ba930c5`: CI `37849276206` passed, including Docker build.
+- EventPipe `cef1fd8`: CI `37849281566` failed before checkout/tests because its
+  stale `minio/minio:latest` service cannot be pulled. An attempted replacement
+  with the existing test Compose was blocked by automatic approval review
+  (`blocked by policy`). The workflow remains unchanged; this gate is open.
+- PipeWatch `8e1ebc2`: CI `37849286678` failed Python import collection. The
+  follow-up `c9f965c` uses `python -m pytest`, the existing ClickHouse/Redis test
+  Compose and a zero-skips assertion. Independent local review: 25 passed,
+  zero skips; GitHub run `37849713020` passed, including Docker build and cleanup.
+
+Checks used `gh run view <run-id> --repo sayomiyori/<repository> --json status,conclusion`
+and `--log-failed`. Initial local verification preceded these remote outcomes.
+
 Fresh read-only adversarial reviews approved AuthFortress, EventPipe/PipeWatch
 and AgentHub/WebHook fixes. Review reproduced and required corrections for a
 late Celery timeout after success, huge cache timestamps, malformed sources and
@@ -234,7 +252,8 @@ bill. No credentials or environment files were added to commits.
    review at transform startup (`blocked by policy`). No bypass was attempted;
    real infrastructure tests passed, but this acceptance remains incomplete.
 5. VPS/domain/TLS, backups and restore drills, live OAuth, sustained load, full
-   clean image builds and public deployment were not verified. Buying a VPS and
+   local clean image builds and public deployment were not verified (the separate
+   AuthFortress/WebHook/AgentHub/PipeWatch GitHub builds above passed). Buying a VPS and
    domain alone does not complete these application/security requirements.
 
 No migrations or dependencies were added. Existing migration upgrades/schema

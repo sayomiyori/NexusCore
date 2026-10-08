@@ -69,6 +69,9 @@ stack, controlled Telegram/AI/reply chain and restricted nginx edge passed.
 See [commands, performance measurements and remaining boundaries](docs/module-verification-2026-10-09.md).
 The checkpoint covers current modules; it does not establish public deployment,
 tenant-safe legacy RAG, observability integration or exactly-once legacy delivery.
+Post-push CI passed for AuthFortress, WebHook Manager, AgentHub and PipeWatch.
+EventPipe CI remains blocked by an unavailable legacy MinIO image; automatic
+approval review rejected the workflow correction. Its local suite passed.
 
 ### Free AI providers
 
