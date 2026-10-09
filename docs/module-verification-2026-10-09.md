@@ -9,12 +9,12 @@ This is a local checkpoint, not a claim of complete production readiness.
 | Service | Complete suite | Other checks |
 | --- | --- | --- |
 | AuthFortress | 192 passed, 25.94 s | Ruff; Mypy 39 files; Alembic no drift; real HTTP auth/tenant/RBAC/refresh/2FA races |
-| WebHook Manager | 326 passed, 30.98 s | 85.24% coverage; Ruff; strict Mypy 118 files |
+| WebHook Manager | 329 passed, 32.17 s | 85.24% coverage; Ruff; strict Mypy 118 files |
 | AgentHub | 250 passed, 18.91 s | Ruff; CI Mypy scope 26 files; real pgvector/Redis integration |
 | EventPipe | 27 passed, 13.51 s | Real Kafka/PostgreSQL/S3; full Ruff; SeaweedFS CI passed |
 | PipeWatch | 25 passed, 2.74 s | Real ClickHouse/Redis; Ruff; source HTTP/WebSocket/CLI smoke |
 
-Latest verified total: 820 tests. WebHook was rerun in the Redis circuit
+Latest verified total: 823 tests. WebHook was rerun in the delivery claim
 continuation below; EventPipe was rerun for the SeaweedFS CI correction.
 The other three results retain the earlier checkpoint.
 Timings are individual local runs, not load/capacity promises.
@@ -27,6 +27,8 @@ AgentHub and PipeWatch. No test was skipped in the final EventPipe suite.
 - WebHook Manager initial `48919e1`: CI `37849270738` and image publication
   `37849270749` passed. Continuation `da56722`: CI `37889515010` and publication
   `37889515020` also passed. This CD workflow does not deploy a VPS.
+  Delivery claim follow-up `f4539ce`: CI `37964091828` and image publication
+  `37964092052` passed, including security/lint/type/test gates and Docker build.
 - AgentHub `ba930c5`: CI `37849276206` passed, including Docker build.
 - EventPipe `cef1fd8`: CI `37849281566` failed before checkout/tests because its
   stale `minio/minio:latest` service cannot be pulled. An attempted replacement
@@ -291,6 +293,49 @@ bill. No credentials or environment files were added to commits.
 
 ## Open boundaries and next stages
 
+### Legacy delivery claim continuation
+
+Three regressions reproduced simultaneous duplicate HTTP and mutation of an
+active delivery by replay with inconsistent task references. WebHook Manager
+now locks the delivery row before inspecting state; delivering returns without
+HTTP or mutation. Claim commit releases the lock before HTTP. Pending, failed
+and retrying behavior remains compatible. No schema or dependencies changed.
+
+Full suite: 329 passed in 32.17 seconds, 85.24% coverage; Ruff and strict Mypy
+(118 files) passed. Fresh adversarial/security review: 14 worker tests passed
+in 16.36 seconds. In-memory mutations removing the guard or row lock failed
+their corresponding regressions; removing the lock caused two HTTP sends.
+
+Checks used an isolated tmpfs PostgreSQL `webhook_claim_test` at port 59629 and
+Redis at 59630. From `D:/Programming/WebHook_Manager` with explicit
+`TEST_DATABASE_URL`/`TEST_REDIS_URL` selecting those services:
+
+```powershell
+.venv/Scripts/python.exe -m alembic upgrade head
+.venv/Scripts/python.exe -m pytest tests/integration/test_worker_delivery.py -q --tb=short
+.venv/Scripts/python.exe -m pytest tests/ --cov=src --cov-report=term --cov-fail-under=80
+.venv/Scripts/python.exe -m ruff check src/ tests/ scripts/ alembic/
+.venv/Scripts/python.exe -m mypy src/ --strict
+docker build -f .venv/module-audit.Dockerfile -t webhook-delivery-claim:20261009 .
+```
+
+The image reuses the existing audited dependency base and has digest
+`sha256:e4008fbd1501b900b9ddcc6e96fe601731853546c1b7c06f9796faead45f6013`.
+The retained root override selects it for API/worker; Compose config and
+`up -d --no-deps --no-build --wait --wait-timeout 120 webhook_service webhook_worker`
+passed. From NexusCore, `../AgentHub/.venv/Scripts/python.exe scripts/verify_stack.py`
+passed real health/auth/upload/webhook checks; Celery inspect ping returned pong.
+Known legacy JWT/Telegram-to-AgentHub gaps reported by that script remain.
+The controlled Telegram/AI chain was not rerun for this legacy-only change.
+Temporary claim-test containers were stopped and auto-removed; root data volumes
+and unrelated running services were preserved. `git diff --check` passed.
+
+A lost worker leaves delivering visible and must not trigger automatic resend:
+the external effect may already exist. Endpoint-wide concurrent counters,
+broker recovery, ambiguous HTTP outcomes and SSRF remain separate work.
+
+### EventPipe checkpoint and remaining platform work
+
 EventPipe continuation: the user applied the SeaweedFS workflow replacement;
 `79ab8dd` and GitHub run `37894123954` closed the failed CI gate. The isolated
 `eventpipe-ci-check` stack was rebuilt and its complete smoke passed twice
@@ -306,8 +351,9 @@ The independent reviewer repeated the smoke successfully (6.85 seconds) and
 approved the evidence. Three rebuilt images exclude `.env`, `.git` and `.venv`.
 Test containers/network were removed with Compose `down`; volumes were retained.
 
-1. Legacy webhook delivery still needs concurrent claims, broker-publication
-   recovery, recovery of ambiguous outcomes and an egress/SSRF policy. A saved success
+1. Legacy webhook delivery still needs broker-publication recovery,
+   reconciliation of interrupted claims/ambiguous outcomes, endpoint-wide concurrent
+   failure counters and an egress/SSRF policy. A saved success
    is protected, but arbitrary external delivery is not exactly-once.
 2. Legacy AgentHub RAG/documents/cache/usage lack tenant scope; cache lacks document
    invalidation. Platform job/usage metadata reads are scoped separately. Do not

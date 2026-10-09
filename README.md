@@ -60,8 +60,8 @@ For service-specific setup and tests, use the README in each service repository.
 
 ### Current module checkpoint — 2026-10-09
 
-Latest verified service suites total **820 tests** (AuthFortress 192,
-WebHook Manager 326, AgentHub 250, EventPipe 27, PipeWatch 25). Full configured
+Latest verified service suites total **823 tests** (AuthFortress 192,
+WebHook Manager 329, AgentHub 250, EventPipe 27, PipeWatch 25). Full configured
 Ruff checks and applicable CI Mypy scopes passed. Fresh independent reviews
 approved the scoped fixes after regression tests. The rebuilt local API/worker
 stack, controlled Telegram/AI/reply chain and restricted nginx edge passed.
@@ -74,9 +74,9 @@ SeaweedFS test Compose; all 27 tests, zero-skip enforcement and three Docker
 builds passed in [run 37894123954](https://github.com/sayomiyori/EventPipe/actions/runs/37894123954).
 The rebuilt EventPipe standalone stack also passed its complete REST/gRPC-to-query
 smoke twice, including S3 signatures and real Kafka DLQ.
-The latest WebHook continuation bounds circuit-breaker Redis socket waits and
-keeps delivery outcomes persistent during cache failures; six regressions were
-added and the complete WebHook suite was rerun.
+The latest WebHook continuation serializes claims for one delivery in PostgreSQL
+and makes delivering replays a no-op; three new regressions and the complete
+WebHook suite passed. Interrupted claims require outcome reconciliation.
 
 ### Free AI providers
 
