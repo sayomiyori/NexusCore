@@ -351,8 +351,10 @@ The independent reviewer repeated the smoke successfully (6.85 seconds) and
 approved the evidence. Three rebuilt images exclude `.env`, `.git` and `.venv`.
 Test containers/network were removed with Compose `down`; volumes were retained.
 
-1. Legacy webhook delivery still needs broker-publication recovery,
-   reconciliation of interrupted claims/ambiguous outcomes, endpoint-wide concurrent
+1. Legacy webhook broker publication/retry source recovery is now verified in
+   `docs/legacy-delivery-recovery-2026-10-09.md`; root runtime rollout remains
+   separate. Delivery still needs reconciliation of interrupted claims/ambiguous
+   outcomes, endpoint-wide concurrent
    failure counters and an egress/SSRF policy. A saved success
    is protected, but arbitrary external delivery is not exactly-once.
 2. Legacy AgentHub RAG/documents/cache/usage lack tenant scope; cache lacks document
