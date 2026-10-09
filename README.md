@@ -60,8 +60,8 @@ For service-specific setup and tests, use the README in each service repository.
 
 ### Current module checkpoint — 2026-10-09
 
-All five service suites passed: **814 tests** in total (AuthFortress 192,
-WebHook Manager 320, AgentHub 250, EventPipe 27, PipeWatch 25). Full configured
+Latest verified service suites total **820 tests** (AuthFortress 192,
+WebHook Manager 326, AgentHub 250, EventPipe 27, PipeWatch 25). Full configured
 Ruff checks and applicable CI Mypy scopes passed. Fresh independent reviews
 approved the scoped fixes after regression tests. The rebuilt local API/worker
 stack, controlled Telegram/AI/reply chain and restricted nginx edge passed.
@@ -72,6 +72,9 @@ tenant-safe legacy RAG, observability integration or exactly-once legacy deliver
 Post-push CI passed for AuthFortress, WebHook Manager, AgentHub and PipeWatch.
 EventPipe CI remains blocked by an unavailable legacy MinIO image; automatic
 approval review rejected the workflow correction. Its local suite passed.
+The latest WebHook continuation bounds circuit-breaker Redis socket waits and
+keeps delivery outcomes persistent during cache failures; six regressions were
+added and the complete WebHook suite was rerun.
 
 ### Free AI providers
 

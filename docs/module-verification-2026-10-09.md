@@ -9,20 +9,23 @@ This is a local checkpoint, not a claim of complete production readiness.
 | Service | Complete suite | Other checks |
 | --- | --- | --- |
 | AuthFortress | 192 passed, 25.94 s | Ruff; Mypy 39 files; Alembic no drift; real HTTP auth/tenant/RBAC/refresh/2FA races |
-| WebHook Manager | 320 passed, 23.03 s | 85.02% coverage; Ruff; strict Mypy 118 files |
+| WebHook Manager | 326 passed, 30.98 s | 85.24% coverage; Ruff; strict Mypy 118 files |
 | AgentHub | 250 passed, 18.91 s | Ruff; CI Mypy scope 26 files; real pgvector/Redis integration |
 | EventPipe | 27 passed, 11.52 s | Real Kafka/PostgreSQL/S3; full Ruff; actual SeaweedFS health command |
 | PipeWatch | 25 passed, 2.74 s | Real ClickHouse/Redis; Ruff; source HTTP/WebSocket/CLI smoke |
 
-Total: 814 tests. Timings are individual local runs, not load/capacity promises.
+Latest verified total: 820 tests. Only WebHook was rerun in the Redis circuit
+continuation below; the other four results retain the earlier checkpoint.
+Timings are individual local runs, not load/capacity promises.
 There are upstream deprecation warnings in AuthFortress, WebHook Manager,
 AgentHub and PipeWatch. No test was skipped in the final EventPipe suite.
 
 ## Post-push GitHub Actions
 
 - AuthFortress `9babd80`: CI run `37849265727` passed, including Docker build.
-- WebHook Manager `48919e1`: CI `37849270738` and image publication
-  `37849270749` passed. This CD workflow does not deploy a VPS.
+- WebHook Manager initial `48919e1`: CI `37849270738` and image publication
+  `37849270749` passed. Continuation `da56722`: CI `37889515010` and publication
+  `37889515020` also passed. This CD workflow does not deploy a VPS.
 - AgentHub `ba930c5`: CI `37849276206` passed, including Docker build.
 - EventPipe `cef1fd8`: CI `37849281566` failed before checkout/tests because its
   stale `minio/minio:latest` service cannot be pulled. An attempted replacement
@@ -40,6 +43,51 @@ Fresh read-only adversarial reviews approved AuthFortress, EventPipe/PipeWatch
 and AgentHub/WebHook fixes. Review reproduced and required corrections for a
 late Celery timeout after success, huge cache timestamps, malformed sources and
 invalid UTF-8/NUL. The corrected regressions and independent reruns passed.
+
+## Continuation: Redis circuit breaker
+
+After the user requested continuation, the EventPipe workflow correction was
+attempted again and rejected with `blocked by policy`. The workflow was not
+changed and no alternate mechanism was used. Work continued on the independent
+legacy WebHook circuit-breaker boundary.
+
+Commit `da56722` bounds Redis socket/connect waits to 0.5 seconds, disables
+transport retries and closes the per-task Redis client on every exit. Redis
+read/INCR/EXPIRE errors no longer prevent the delivery outcome from being saved.
+The PostgreSQL endpoint failure count still enforces the threshold; a smaller
+Redis count cannot schedule another retry after the DB threshold is reached.
+New logs carry UUIDs and static operation labels, not exceptions or credentials.
+
+Five regressions failed before the fix; a sixth case checks DB count=10 with zero
+HTTP calls. Final full suite: 326 passed. Independent review: 11 worker tests,
+Ruff, Mypy and security pass approved. A mutation removing max(DB, Redis) failed
+the threshold regression. A real local TCP server that accepted but never
+answered a Redis request timed out after 0.519 seconds, with one connection.
+This is a socket-wait probe, not a total task deadline or throughput benchmark.
+
+Verification used a fresh tmpfs PostgreSQL `webhook_circuit_test` on port 59629
+and an isolated Redis on 59630. `TEST_DATABASE_URL` and `TEST_REDIS_URL` selected
+only those resources. Commands from WebHook Manager:
+
+```powershell
+.venv/Scripts/python.exe -m alembic upgrade head
+.venv/Scripts/python.exe -m pytest tests/integration/test_worker_delivery.py -q --tb=short
+.venv/Scripts/python.exe -m pytest tests/ --cov=src --cov-report=term --cov-fail-under=80
+.venv/Scripts/python.exe -m ruff check src/ tests/ scripts/ alembic/
+.venv/Scripts/python.exe -m mypy src/ --strict
+docker build -f .venv/module-audit.Dockerfile -t webhook-circuit-resilience:20261009 .
+```
+
+The controlled Telegram/AI chain passed with that image and the existing
+AuthFortress/AgentHub images. No live Telegram/provider calls were made. Broker
+publication loss, concurrent claims and ambiguous HTTP sends are still separate
+recovery work; this change does not claim exactly-once delivery.
+
+The local WebHook API/worker were updated through the retained host-local Compose
+overrides. `scripts/verify_stack.py` passed after recreation; Celery inspect ping
+returned one pong. A ten-minute log scan counted zero tracebacks/ERROR markers.
+The two owned `nexus-circuit-audit-*` containers were stopped and removed by
+their `--rm` policy; existing runtime volumes were preserved.
 
 ## Changes
 
@@ -144,13 +192,13 @@ contain the exact base tags and one `COPY app` / `COPY src` instruction.
 | --- | --- |
 | `authfortress-resilience:20261009` | `sha256:6eed5d0700104497e08243ab39cad6c16b1eda020dabd056444f790b7269885d` |
 | `agenthub-resilience:20261009` | `sha256:78d7ea5648b50f5aec7facfc1223be0391bec81166babf25db38005f23079cf6` |
-| `webhook-resilience:20261009` | `sha256:a3343085ad8fc6844ce25be245e837c91eae7b530bdc5e27d6d8b7301324d28b` |
+| `webhook-circuit-resilience:20261009` | `sha256:549e869043f7ec813ab3f07b30e19867f327bc89107e511dd78197195161b7d4` |
 
 ```powershell
 # In each corresponding service repository
 docker build -f .venv/module-audit.Dockerfile -t <image-above> .
 # From NexusCore, TEST_DATABASE_URL points to the isolated PostgreSQL above
-../AgentHub/.venv/Scripts/python.exe scripts/verify_telegram_ai.py --webhook-image webhook-resilience:20261009 --agent-image agenthub-resilience:20261009 --auth-image authfortress-resilience:20261009
+../AgentHub/.venv/Scripts/python.exe scripts/verify_telegram_ai.py --webhook-image webhook-circuit-resilience:20261009 --agent-image agenthub-resilience:20261009 --auth-image authfortress-resilience:20261009
 ../AgentHub/.venv/Scripts/python.exe scripts/verify_telegram_edge.py --python-image agenthub-resilience:20261009
 docker compose -f docker-compose.yml -f .venv/root-adoption.compose.yml -f .venv/root-auth-update.compose.yml config --quiet
 docker compose -f docker-compose.yml -f .venv/root-adoption.compose.yml -f .venv/root-auth-update.compose.yml up -d --no-deps --no-build --wait --wait-timeout 120 auth_service webhook_service webhook_worker agent_service agent_worker
@@ -239,8 +287,8 @@ bill. No credentials or environment files were added to commits.
 
 ## Open boundaries and next stages
 
-1. Legacy webhook delivery still needs concurrent claims, bounded circuit-breaker
-   waits, recovery of ambiguous outcomes and an egress/SSRF policy. A saved success
+1. Legacy webhook delivery still needs concurrent claims, broker-publication
+   recovery, recovery of ambiguous outcomes and an egress/SSRF policy. A saved success
    is protected, but arbitrary external delivery is not exactly-once.
 2. Legacy AgentHub RAG/documents/cache/usage lack tenant scope; cache lacks document
    invalidation. Platform job/usage metadata reads are scoped separately. Do not
