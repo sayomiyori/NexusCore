@@ -69,9 +69,11 @@ stack, controlled Telegram/AI/reply chain and restricted nginx edge passed.
 See [commands, performance measurements and remaining boundaries](docs/module-verification-2026-10-09.md).
 The checkpoint covers current modules; it does not establish public deployment,
 tenant-safe legacy RAG, observability integration or exactly-once legacy delivery.
-Post-push CI passed for AuthFortress, WebHook Manager, AgentHub and PipeWatch.
-EventPipe CI remains blocked by an unavailable legacy MinIO image; automatic
-approval review rejected the workflow correction. Its local suite passed.
+Post-push CI passed for all five services. EventPipe now uses its existing
+SeaweedFS test Compose; all 27 tests, zero-skip enforcement and three Docker
+builds passed in [run 37894123954](https://github.com/sayomiyori/EventPipe/actions/runs/37894123954).
+The rebuilt EventPipe standalone stack also passed its complete REST/gRPC-to-query
+smoke twice, including S3 signatures and real Kafka DLQ.
 The latest WebHook continuation bounds circuit-breaker Redis socket waits and
 keeps delivery outcomes persistent during cache failures; six regressions were
 added and the complete WebHook suite was rerun.

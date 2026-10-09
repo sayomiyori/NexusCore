@@ -11,11 +11,12 @@ This is a local checkpoint, not a claim of complete production readiness.
 | AuthFortress | 192 passed, 25.94 s | Ruff; Mypy 39 files; Alembic no drift; real HTTP auth/tenant/RBAC/refresh/2FA races |
 | WebHook Manager | 326 passed, 30.98 s | 85.24% coverage; Ruff; strict Mypy 118 files |
 | AgentHub | 250 passed, 18.91 s | Ruff; CI Mypy scope 26 files; real pgvector/Redis integration |
-| EventPipe | 27 passed, 11.52 s | Real Kafka/PostgreSQL/S3; full Ruff; actual SeaweedFS health command |
+| EventPipe | 27 passed, 13.51 s | Real Kafka/PostgreSQL/S3; full Ruff; SeaweedFS CI passed |
 | PipeWatch | 25 passed, 2.74 s | Real ClickHouse/Redis; Ruff; source HTTP/WebSocket/CLI smoke |
 
-Latest verified total: 820 tests. Only WebHook was rerun in the Redis circuit
-continuation below; the other four results retain the earlier checkpoint.
+Latest verified total: 820 tests. WebHook was rerun in the Redis circuit
+continuation below; EventPipe was rerun for the SeaweedFS CI correction.
+The other three results retain the earlier checkpoint.
 Timings are individual local runs, not load/capacity promises.
 There are upstream deprecation warnings in AuthFortress, WebHook Manager,
 AgentHub and PipeWatch. No test was skipped in the final EventPipe suite.
@@ -30,7 +31,10 @@ AgentHub and PipeWatch. No test was skipped in the final EventPipe suite.
 - EventPipe `cef1fd8`: CI `37849281566` failed before checkout/tests because its
   stale `minio/minio:latest` service cannot be pulled. An attempted replacement
   with the existing test Compose was blocked by automatic approval review
-  (`blocked by policy`). The workflow remains unchanged; this gate is open.
+  (`blocked by policy`). The user subsequently applied the reviewed workflow.
+  Follow-up `79ab8dd`: CI `37894123954` passed, including all 27 tests (8.47 s),
+  zero-skip enforcement, three Docker builds and unconditional cleanup.
+  Fresh read-only adversarial review and the scoped security pass approved.
 - PipeWatch `8e1ebc2`: CI `37849286678` failed Python import collection. The
   follow-up `c9f965c` uses `python -m pytest`, the existing ClickHouse/Redis test
   Compose and a zero-skips assertion. Independent local review: 25 passed,
@@ -287,6 +291,21 @@ bill. No credentials or environment files were added to commits.
 
 ## Open boundaries and next stages
 
+EventPipe continuation: the user applied the SeaweedFS workflow replacement;
+`79ab8dd` and GitHub run `37894123954` closed the failed CI gate. The isolated
+`eventpipe-ci-check` stack was rebuilt and its complete smoke passed twice
+using `.venv/Scripts/python.exe -m scripts.verify_eventpipe`; the second run
+took 6.60 seconds. REST/batch/gRPC, repeated event identity, normalization,
+PostgreSQL/query, S3 raw bytes and public-host SigV4, invalid/not-found paths
+and real Kafka DLQ passed. The previous transform startup blocker did not recur.
+All six healthchecked services were healthy; Zookeeper was running.
+Local Debian HTTP 503 and pip resolution failures required unchanged build
+retries. No source/dependency changes were needed for the successful builds.
+These functional checks do not establish sustained load or tenant isolation.
+The independent reviewer repeated the smoke successfully (6.85 seconds) and
+approved the evidence. Three rebuilt images exclude `.env`, `.git` and `.venv`.
+Test containers/network were removed with Compose `down`; volumes were retained.
+
 1. Legacy webhook delivery still needs concurrent claims, broker-publication
    recovery, recovery of ambiguous outcomes and an egress/SSRF policy. A saved success
    is protected, but arbitrary external delivery is not exactly-once.
@@ -296,12 +315,9 @@ bill. No credentials or environment files were added to commits.
 3. PipeWatch management/callbacks and EventPipe lack shared identity and tenant
    filtering; callbacks permit private destinations. PipeWatch queue, alert rules
    and history are volatile. Observability is not yet connected to NexusCore.
-4. Full fresh EventPipe multi-process smoke was blocked twice by automatic approval
-   review at transform startup (`blocked by policy`). No bypass was attempted;
-   real infrastructure tests passed, but this acceptance remains incomplete.
-5. VPS/domain/TLS, backups and restore drills, live OAuth, sustained load, full
+4. VPS/domain/TLS, backups and restore drills, live OAuth, sustained load, full
    local clean image builds and public deployment were not verified (the separate
-   AuthFortress/WebHook/AgentHub/PipeWatch GitHub builds above passed). Buying a VPS and
+   five-service GitHub builds above and EventPipe local builds passed). Buying a VPS and
    domain alone does not complete these application/security requirements.
 
 No migrations or dependencies were added. Existing migration upgrades/schema
