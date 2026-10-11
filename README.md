@@ -188,19 +188,30 @@ copies before root writes. Legacy data, sequence state, ownership and privileges
 were preserved. The four AgentHub/WebHook application processes now use the
 verified images; API health and legacy worker pongs passed. AI/intake/reply flags
 remain disabled; no root live AI flow was enabled. On the verified local host,
-restart uses the retained `.venv/root-adoption.compose.yml` and
-`.venv/root-auth-update.compose.yml` overrides (not tracked) to pin the verified
-images and disabled flags:
+restart uses the retained `.venv/root-adoption.compose.yml`,
+`.venv/root-auth-update.compose.yml` and `.venv/root-delivery-recovery.compose.yml`
+overrides (not tracked, in that order) to pin the verified images and disabled
+flags. The last override was added with the approved recovery rollout below:
 
 ```powershell
-docker compose -f docker-compose.yml -f .venv/root-adoption.compose.yml -f .venv/root-auth-update.compose.yml up -d --no-build --no-deps agent_service agent_worker webhook_service webhook_worker
+docker compose -f docker-compose.yml -f .venv/root-adoption.compose.yml -f .venv/root-auth-update.compose.yml -f .venv/root-delivery-recovery.compose.yml up -d --no-build --pull never --no-deps agent_service agent_worker webhook_service webhook_worker webhook_delivery_recovery
 ```
 
 This command describes that host's deployment, not a fresh-clone setup. Do not
 restart its old WebHook images against the new migration revision.
 
+On 2026-10-11, the separately approved
+[legacy delivery recovery rollout](docs/legacy-recovery-rollout-2026-10-11.md)
+advanced WebHook to `6e2f8a1c9b04`, replaced only its API/worker and started the
+opt-in `webhook_delivery_recovery` scanner. Fresh encrypted backup/restore and
+forward migration rehearsals passed; all old rows/schema/sequences/owners/ACLs
+were preserved. The worker responds to ping, the scanner is idle with an empty
+queue, API health/refusal checks pass and other root containers are unchanged.
+Inspect legacy pending destinations before future scanner activation, even when
+platform live flags are off.
+
 Tenant isolation is not implemented across the entire platform. Legacy webhook
-delivery recovery/egress restrictions and public deployment remain open.
+egress restrictions and public deployment remain open.
 NexusCore is a development demo workspace.
 
 The root stack smoke check requires Python 3.12 or newer and the running Compose stack:
@@ -227,7 +238,7 @@ webhook or enable the root AI flow.
 
 1. Define a separately approved root opt-in acceptance before enabling the
    verified [AI/reply flow](specs/telegram-ai-reply.md) there; schema adoption is complete.
-2. Close legacy delivery recovery/egress restrictions and platform-wide isolation.
+2. Close legacy egress restrictions and platform-wide isolation.
 3. Connect the event/log pipelines, dashboard and deployment setup.
 
 The first platform read increment is implemented in AgentHub:

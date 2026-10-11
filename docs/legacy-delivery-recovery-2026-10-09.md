@@ -135,9 +135,10 @@ Old workers do not write durable retry due times. The scanner is required for
 recovery; simply upgrading source does not supervise it automatically. README
 documents the separate process commands, migration and operational warnings.
 
-Root schema/image/Compose were **not upgraded**. Its retained API/worker image
-is the previous delivery-claim checkpoint; rollout with schema/data rehearsal
-remains a separate step. Root volumes, unrelated open-webui and live flags were
+At this 2026-10-09 checkpoint, root schema/image/Compose were **not upgraded**.
+The separately approved [2026-10-11 rollout](legacy-recovery-rollout-2026-10-11.md)
+subsequently migrated the root and deployed its API/worker/scanner after fresh
+backup/restore rehearsal. Root volumes, unrelated open-webui and live flags were
 preserved. User WebHook changes `docker-compose.yml` and `.cursor/` are excluded.
 
 Recovery covers already persisted delivery intents. A crash before background
