@@ -56,6 +56,18 @@ AuthFortress and WebHook Manager apply their existing forward Alembic migrations
 
 For service-specific setup and tests, use the README in each service repository. EventPipe and PipeWatch are not started by the root Compose file.
 
+For a bounded loopback GET probe, use an environment with the existing `httpx`
+dependency, for example the WebHook Manager virtualenv:
+
+```powershell
+../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_local_load.py http://127.0.0.1:28080/health --duration 5 --concurrency 4
+../WebHook_Manager/.venv/Scripts/python.exe -m unittest discover -s tests -p test_verify_local_load.py -v
+```
+
+The probe permits only loopback health endpoints or `/api/v1/auth/me`, uses no
+proxy or redirects, and caps duration and concurrency. Auth requests can append
+audit records. The results describe this local probe, not production capacity.
+
 ## Verification status
 
 ### Current module checkpoint — 2026-10-09
