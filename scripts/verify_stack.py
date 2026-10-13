@@ -38,6 +38,14 @@ KINDS = {"postgres": "postgres", "redis": "redis", "callback": "web",
          "auth_service": "auth", "webhook_service": "web", "webhook_worker": "web",
          "agent_service": "agent", "agent_worker": "agent"}
 AI_KINDS = {**KINDS, "agent_publisher": "agent", "webhook_sender": "web"}
+AI_SCANNERS = {"ingress_scanner": ("web", "scripts.recover_platform_outbox"),
+               "job_scanner": ("agent", "scripts.recover_telegram_jobs"),
+               "reply_scanner": ("agent", "scripts.recover_telegram_replies"),
+               "send_scanner": ("web", "scripts.recover_telegram_answers")}
+LEGACY_SCANNERS = {"legacy_scanner": ("web", "scripts.recover_legacy_deliveries")}
+SCANNER_DATABASE_MARKERS = {"ingress_scanner": "platform_recovery_unavailable",
+    "job_scanner": "Telegram job recovery unavailable", "reply_scanner": "Telegram answer recovery unavailable",
+    "send_scanner": "Telegram send recovery unavailable", "legacy_scanner": "delivery_recovery_unavailable"}
 FLAGS = ("PLATFORM_BOTS_ENABLED", "PLATFORM_TELEGRAM_ENABLED", "TELEGRAM_REPLIES_ENABLED",
          "PLATFORM_TENANT_ENABLED", "PLATFORM_READ_ENABLED", "TELEGRAM_AI_ENABLED")
 EXTERNAL = ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
@@ -85,6 +93,61 @@ def request(url, method="GET", payload=None, headers=None, *, allowed_addresses=
 
 def expect(status, expected):
     require(status == expected, f"Expected HTTP {expected}, received {status}")
+
+
+def wait_until(check, message, seconds=60):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if check():
+            return
+        time.sleep(1)
+    raise VerificationError(message)
+
+
+def restart_scanners(fixture):
+    """Kill only an inspected scanner child; let its bounded Docker policy restart it."""
+    evidence = {}
+    code = '''import os,signal,sys
+from pathlib import Path
+pids=[]
+for entry in Path('/proc').iterdir():
+    if not entry.name.isdecimal() or int(entry.name)<=1: continue
+    try: parts=(entry/'cmdline').read_bytes().split(b'\\0')
+    except (FileNotFoundError,PermissionError): continue
+    if parts[:3]==[b'python',b'-m',sys.argv[1].encode()]: pids.append(int(entry.name))
+if len(pids)!=1: raise RuntimeError('Scanner child identity mismatch')
+os.kill(pids[0],signal.SIGKILL)
+'''
+    for name, (_, module) in fixture.scanners.items():
+        original = fixture.owned()[name]
+        require(original["State"]["Running"], "Scanner is not running before fault")
+        fixture.compose("exec", "-T", name, "python", "-c", code, module)
+
+        def restarted(name=name, original=original):
+            current = fixture.owned()[name]
+            require(current["Id"] == original["Id"] and not current["State"]["OOMKilled"], "Scanner identity/OOM changed")
+            return current["State"]["Running"] and current["RestartCount"] > original["RestartCount"] and current["State"]["StartedAt"] != original["State"]["StartedAt"]
+
+        wait_until(restarted, "Scanner automatic restart deadline exceeded", 45)
+        evidence[name] = {"automatic_restart": True, "same_container": True}
+    return evidence
+
+
+def scanner_database_outage(fixture):
+    fixture.compose("up", "-d", "--no-build", "--pull", "never", "--no-deps", *fixture.scanners)
+    original = fixture.owned()
+    before = {name: fixture.compose("logs", "--no-color", "--tail", "100", name).count(SCANNER_DATABASE_MARKERS[name])
+              for name in fixture.scanners}
+    fixture.compose("stop", "--timeout", "10", "postgres")
+    wait_until(lambda: all(fixture.compose("logs", "--no-color", "--tail", "100", name).count(SCANNER_DATABASE_MARKERS[name]) > before[name]
+                           for name in fixture.scanners), "Permanent scanners did not observe PostgreSQL outage", 40)
+    current = fixture.owned()
+    require(all(current[name]["State"]["Running"] and current[name]["Id"] == original[name]["Id"] and
+                current[name]["State"]["StartedAt"] == original[name]["State"]["StartedAt"] for name in fixture.scanners),
+            "Scanner exited or restarted during PostgreSQL outage")
+    fixture.compose("start", "postgres")
+    wait_until(lambda: fixture.owned()["postgres"]["State"].get("Health", {}).get("Status") == "healthy", "Fixture PostgreSQL did not recover")
+    return {name: {"postgres_outage_observed": True, "same_running_process": True} for name in fixture.scanners}
 
 
 def receiver_handler(signing_secret):
@@ -151,7 +214,7 @@ def create_agent_app():
     return app
 
 
-def smoke_config(images):
+def smoke_config(images, scanners=False):
     closed = {**dict.fromkeys(FLAGS, "false"), **dict.fromkeys(EXTERNAL, "")}
     common = {"restart": "no", "mem_limit": "256m", "security_opt": ["no-new-privileges:true"]}
     health = {"test": ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=2)"],
@@ -197,21 +260,25 @@ def smoke_config(images):
             "volumes": ["uploads:/app/uploads"],
             "command": ["celery", "-A", "app.workers.embed_worker.celery_app", "worker", "--loglevel=warning", "--concurrency=1"]},
     }
+    if scanners:
+        services["legacy_scanner"] = {**common, "image": images["web"], "environment": web,
+            "init": True, "restart": "on-failure:2", "mem_limit": "128m",
+            "command": ["python", "-m", LEGACY_SCANNERS["legacy_scanner"][1]]}
     return {"services": services, "networks": {"default": {"internal": True}},
             "volumes": {"uploads": {}, "postgres_data": {}, "redis_data": {}}}
 
 
 def traffic_settings(name, environment, controlled_ai=False):
     enabled = set()
-    if controlled_ai and name in {"webhook_service", "webhook_worker", "webhook_sender"}:
+    if controlled_ai and name in {"webhook_service", "webhook_worker", "webhook_sender", "ingress_scanner", "send_scanner"}:
         enabled = {"PLATFORM_BOTS_ENABLED", "PLATFORM_TELEGRAM_ENABLED", "TELEGRAM_REPLIES_ENABLED"}
-    elif controlled_ai and name in {"agent_service", "agent_worker", "agent_publisher"}:
+    elif controlled_ai and name in {"agent_service", "agent_worker", "agent_publisher", "job_scanner", "reply_scanner"}:
         enabled = {"TELEGRAM_AI_ENABLED"}
     require(all(str(environment.get(flag, "false")).lower() == str(flag in enabled).lower()
                 for flag in FLAGS), "Unexpected platform flag")
     for key in EXTERNAL:
         expected = "synthetic-groq-verification" if controlled_ai and name in {
-            "agent_service", "agent_worker", "agent_publisher"} and key == "GROQ_API_KEY" else ""
+            "agent_service", "agent_worker", "agent_publisher", "job_scanner", "reply_scanner"} and key == "GROQ_API_KEY" else ""
         require(environment.get(key, "") == expected, "External traffic credentials configured")
     if controlled_ai and enabled:
         if "TELEGRAM_AI_ENABLED" in enabled:
@@ -223,8 +290,9 @@ def traffic_settings(name, environment, controlled_ai=False):
                     environment.get("TELEGRAM_WEBHOOK_ORIGIN") == "https://demo.example.com", "Unexpected controlled service origins")
 
 
-def validate_config(config, project, images, controlled_ai=False):
-    kinds = AI_KINDS if controlled_ai else KINDS
+def validate_config(config, project, images, controlled_ai=False, scanners=False):
+    scanner_roles = (AI_SCANNERS if controlled_ai else LEGACY_SCANNERS) if scanners else {}
+    kinds = {**(AI_KINDS if controlled_ai else KINDS), **{name: role[0] for name, role in scanner_roles.items()}}
     require(project.startswith("nexus-smoke-") and len(project) == 44, "Invalid fixture project")
     require(config["name"] == project and set(config["services"]) == set(kinds), "Unexpected fixture services")
     require(set(config["networks"]) == {"default"} and config["networks"]["default"]["internal"], "Fixture network must be internal")
@@ -239,6 +307,9 @@ def validate_config(config, project, images, controlled_ai=False):
         require(set(service.get("networks", {})) == {"default"}, "Unexpected service network")
         require(not any(service.get(key) for key in ("container_name", "build", "privileged", "network_mode", "env_file", "extra_hosts")), "Unsafe fixture option")
         require(not service.get("ports"), "Fixture must not publish host ports")
+        if name in scanner_roles:
+            require(service.get("init") and service.get("restart") == "on-failure:2" and
+                    service["command"] == ["python", "-m", scanner_roles[name][1]], "Unexpected permanent scanner entrypoint/policy")
         for volume in service.get("volumes", []):
             mounts = {"postgres": ("postgres_data", "/var/lib/postgresql/data"), "redis": ("redis_data", "/data"),
                       "agent_service": ("uploads", "/app/uploads"), "agent_worker": ("uploads", "/app/uploads")}
@@ -263,9 +334,10 @@ def validate_config(config, project, images, controlled_ai=False):
 
 
 class Fixture:
-    def __init__(self, images, *, controlled_ai=False, config_factory=smoke_config):
+    def __init__(self, images, *, controlled_ai=False, scanners=False, config_factory=smoke_config):
         self.controlled_ai = controlled_ai
-        self.kinds = AI_KINDS if controlled_ai else KINDS
+        self.scanners = (AI_SCANNERS if controlled_ai else LEGACY_SCANNERS) if scanners else {}
+        self.kinds = {**(AI_KINDS if controlled_ai else KINDS), **{name: role[0] for name, role in self.scanners.items()}}
         self.project = "nexus-smoke-" + uuid4().hex
         self.directory = ROOT / ".venv" / self.project
         self.directory.mkdir(parents=True, exist_ok=False)
@@ -273,7 +345,8 @@ class Fixture:
             key: secrets.token_hex(32) for key in ("SMOKE_DB_PASSWORD", "SMOKE_AUTH_SECRET", "SMOKE_WEB_SECRET", "SMOKE_SIGNING_SECRET")}}
         self.images = {kind: json.loads(self.run(["docker", "image", "inspect", image]))[0]["Id"]
                        for kind, image in images.items()}
-        (self.directory / "compose.json").write_text(json.dumps(config_factory(self.images)))
+        config = config_factory(self.images, scanners=True) if scanners else config_factory(self.images)
+        (self.directory / "compose.json").write_text(json.dumps(config))
         (self.directory / "empty.env").write_text("")
         self.prefix = ["docker", "compose", "--project-name", self.project, "--project-directory", str(self.directory),
                        "--env-file", str(self.directory / "empty.env"), "-f", str(self.directory / "compose.json")]
@@ -290,7 +363,7 @@ class Fixture:
 
     def config(self):
         self.compose("config", "--quiet")
-        validate_config(json.loads(self.compose("config", "--format", "json")), self.project, self.images, self.controlled_ai)
+        validate_config(json.loads(self.compose("config", "--format", "json")), self.project, self.images, self.controlled_ai, bool(self.scanners))
 
     def owned(self):
         ids = self.compose("ps", "--all", "--quiet").splitlines()
@@ -307,6 +380,10 @@ class Fixture:
             require(item["Image"] == self.images[self.kinds[name]], "Container image mismatch")
             require(set(item["NetworkSettings"]["Networks"]) == {self.project + "_default"}, "Container network mismatch")
             require(not item["HostConfig"].get("PortBindings") and not item["HostConfig"].get("PublishAllPorts"), "Unexpected host publication")
+            if name in self.scanners:
+                require(item["HostConfig"].get("Init") and item["HostConfig"]["RestartPolicy"] ==
+                        {"Name": "on-failure", "MaximumRetryCount": 2} and
+                        item["Config"]["Cmd"] == ["python", "-m", self.scanners[name][1]], "Actual scanner entrypoint/policy mismatch")
             environment = dict(value.split("=", 1) for value in item["Config"]["Env"] if "=" in value)
             traffic_settings(name, environment, self.controlled_ai)
             if self.controlled_ai and name not in {"postgres", "redis", "callback", "auth_service"}:
@@ -378,8 +455,10 @@ print(json.dumps(request(data['url'],data['method'],payload,data['headers'],allo
         self.stage = "fixture workers"
         if not self.controlled_ai:
             self.compose("up", "-d", "--no-build", "--pull", "never", "--no-deps", "webhook_worker", "agent_worker")
+            if self.scanners:
+                self.compose("up", "-d", "--no-build", "--pull", "never", "--no-deps", *self.scanners)
         self.items = self.owned()
-        expected = set(self.kinds) - {"webhook_worker", "agent_worker", "webhook_sender", "agent_publisher"} if self.controlled_ai else set(self.kinds)
+        expected = set(self.kinds) - set(self.scanners) - {"webhook_worker", "agent_worker", "webhook_sender", "agent_publisher"} if self.controlled_ai else set(self.kinds)
         require(set(self.items) == expected, "Incomplete fixture")
         self.addresses = [urlsplit(self.url(name)).hostname for name in self.items]
 
@@ -401,13 +480,16 @@ print(json.dumps(request(data['url'],data['method'],payload,data['headers'],allo
             require(version == expected, "Fixture migration head mismatch")
             versions[database] = version
         if self.controlled_ai:
-            return {"revisions": versions, "application_uid": 10001,
-                    "all_ten_processes_running_without_oom": True, "probe_transport": "owned callback exec, inspected IP allowlist"}
+            return {"revisions": versions, "application_uid": 10001, "processes_running_without_oom": len(items),
+                    **({"all_ten_processes_running_without_oom": True} if not self.scanners else {}),
+                    "permanent_scanners": list(self.scanners), "probe_transport": "owned callback exec, inspected IP allowlist"}
         web = json.loads(self.compose("exec", "-T", "postgres", "psql", "-U", "smoke", "-d", "webhook_test", "-At", "-c",
             "SELECT json_build_object('events',(SELECT count(*) FROM webhook_events),'deliveries',(SELECT count(*) FROM delivery_attempts),'success',(SELECT count(*) FROM delivery_attempts WHERE lower(status::text)='success'))"))
         require(web == {"events": 2, "deliveries": 2, "success": 2}, "Fixture durable event/delivery counts differ")
         return {"revisions": versions, "webhook_rows": web, "application_uid": 10001,
-                "all_eight_processes_running_without_oom": True, "probe_transport": "owned callback exec, inspected IP allowlist"}
+                "processes_running_without_oom": len(items), "permanent_scanners": list(self.scanners),
+                **({"all_eight_processes_running_without_oom": True} if not self.scanners else {}),
+                "probe_transport": "owned callback exec, inspected IP allowlist"}
 
 
 def provision(fixture, owner_id):
@@ -499,8 +581,28 @@ def verify(fixture):
     headers = {"X-Webhook-Signature": signature, "X-Idempotency-Key": run_id, "X-Event-Type": "nexus.telegram",
                "Authorization": "Bearer synthetic-unused", "Cookie": "synthetic-unused", **key_headers,
                "X-Telegram-Bot-Api-Secret-Token": signing_secret}
+    if fixture.scanners:
+        fixture.stage = "legacy scanner PostgreSQL outage"
+        scanner_database_outage(fixture)
+        fixture.stage = "legacy pending admission"
+        fixture.owned()
+        # Admit with healthy Redis; keep the scanner and consumer stopped until the fault.
+        fixture.compose("stop", "--timeout", "10", "legacy_scanner", "webhook_worker")
     status, event = request(ingress, "POST", payload, headers)
     expect(status, 202)
+    if fixture.scanners:
+        fixture.stage = "legacy scanner broker outage"
+        fixture.owned()
+        fixture.compose("stop", "--timeout", "10", "redis")
+        fixture.compose("start", "legacy_scanner")
+        before = fixture.owned()["legacy_scanner"]
+        wait_until(lambda: "delivery_broker_unavailable" in fixture.compose("logs", "--no-color", "--tail", "100", "legacy_scanner"),
+                   "Legacy scanner did not observe broker outage", 60)
+        current = fixture.owned()["legacy_scanner"]
+        require(current["State"]["Running"] and current["State"]["StartedAt"] == before["State"]["StartedAt"], "Legacy scanner exited on broker outage")
+        fixture.compose("start", "redis")
+        wait_until(lambda: fixture.owned()["redis"]["State"].get("Health", {}).get("Status") == "healthy", "Fixture broker recovery failed")
+        fixture.compose("start", "webhook_worker")
     status, duplicate = request(ingress, "POST", payload, headers)
     expect(status, 200)
     require(duplicate["event_id"] == event["event_id"], "Duplicate produced new event")
@@ -512,7 +614,7 @@ def verify(fixture):
     events = [event["event_id"], admissions[0][1]["event_id"]]
     for event_id in events:
         query = urlencode({"owner_id": user["user_id"], "event_id": event_id})
-        deadline = time.monotonic() + 45
+        deadline = time.monotonic() + (90 if fixture.scanners else 45)
         while time.monotonic() < deadline:
             status, history = request(web + "/api/v1/deliveries?" + query, headers=key_headers)
             expect(status, 200)
@@ -528,15 +630,23 @@ def verify(fixture):
     require(all(record["body"] == json.loads(payload) and not record["sensitive_headers"] for record in receipt["records"]), "Payload or sensitive-header contract failed")
     require(all(record["delivery_id"] for record in receipt["records"]) and len({record["delivery_id"] for record in receipt["records"]}) == 2, "Missing or duplicate delivery correlation IDs")
     expect(request(agent + "/api/v1/query", "POST", payload)[0], 422)
+    scanner_proof = {}
+    if fixture.scanners:
+        fixture.stage = "legacy scanner automatic restart"
+        scanner_proof = restart_scanners(fixture)
+        scanner_proof["legacy_scanner"].update(postgres_outage_observed=True, broker_outage_observed=True)
+        time.sleep(6)
+        require(len(request(callback + "/receipt")[1]["records"]) == 2, "Scanner restart repeated delivery")
     print("PASS: bad HMAC/unsafe origin rejected; real queued signed numeric-IP delivery; sequential/concurrent duplicates and header exclusion")
     return {"upload_ready": True, "auth_denials": 4, "events": 2, "callbacks": 2,
-            "concurrent_admissions": 4, "standalone_query_rejection": 422}
+            "concurrent_admissions": 4, "standalone_query_rejection": 422, "scanner_restarts": scanner_proof}
 
 
 def main(argv=None):
     require(not sys.flags.optimize, "Optimized Python is not supported")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--receiver", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--scanners", action="store_true", help="Verify the permanent legacy scanner with owned outages/restarts")
     for kind, image in IMAGES.items():
         option = "webhook" if kind == "web" else kind
         parser.add_argument(f"--{option}-image", default=image)
@@ -552,7 +662,7 @@ def main(argv=None):
             server.server_close()
         return
     images = {kind: getattr(args, ("webhook" if kind == "web" else kind) + "_image") for kind in IMAGES}
-    fixture = Fixture(images)
+    fixture = Fixture(images, scanners=args.scanners)
     report = {"project": fixture.project, "images": fixture.images, "external_calls_enabled": False}
     try:
         fixture.start()

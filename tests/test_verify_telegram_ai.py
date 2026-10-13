@@ -20,8 +20,8 @@ from scripts import verify_stack as smoke
 from scripts import verify_telegram_ai as ai
 
 
-def controlled_config():
-    value = ai.ai_config(smoke.IMAGES)
+def controlled_config(scanners=False):
+    value = ai.ai_config(smoke.IMAGES, scanners)
     value["name"] = PROJECT
     value["networks"]["default"]["name"] = PROJECT + "_default"
     for key, volume in value["volumes"].items():
@@ -34,6 +34,88 @@ def controlled_config():
 
 
 class ControlledAISmokeTests(unittest.TestCase):
+    def test_permanent_scanners_require_exact_real_entrypoints_and_bounded_restart(self):
+        good = controlled_config(True)
+        smoke.validate_config(good, PROJECT, smoke.IMAGES, True, True)
+        smoke.validate_config(resolved_config(True), PROJECT, smoke.IMAGES, False, True)
+        with self.assertRaises(ValueError):
+            smoke.validate_config(good, PROJECT, smoke.IMAGES, True)
+        for change in (
+            lambda value: value["services"]["job_scanner"].update(command=["python", "-m", "scripts.recover_telegram_jobs", "--once"]),
+            lambda value: value["services"]["send_scanner"].update(restart="always"),
+            lambda value: value["services"]["reply_scanner"].update(init=False),
+            lambda value: value["services"]["ingress_scanner"]["environment"].update(AGENTHUB_BASE_URL="http://127.0.0.1:8014"),
+        ):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                changed = copy.deepcopy(good)
+                change(changed)
+                smoke.validate_config(changed, PROJECT, smoke.IMAGES, True, True)
+
+    def test_notification_fault_refuses_foreign_queues_and_requires_a_consumed_message(self):
+        fixture = MagicMock()
+        for database, queue in ((0, "celery"), (1, "telegram_ai"), (2, "telegram_send"), (2, "unknown")):
+            with self.subTest(database=database, queue=queue), self.assertRaises(ValueError):
+                ai.consume_notifications(fixture, database, queue)
+        fixture.owned.assert_not_called()
+        fixture.compose.assert_not_called()
+        fixture.compose.return_value = "0"
+        with self.assertRaises(ValueError):
+            ai.consume_notifications(fixture, 2, "telegram_ai")
+        fixture.compose.return_value = "2"
+        self.assertEqual(ai.consume_notifications(fixture, 2, "telegram_ai"), 2)
+        self.assertIn("LPOP", fixture.compose.call_args.args[-3])
+
+    def test_process_fault_requires_ownership_and_confirmed_automatic_restart(self):
+        fixture = MagicMock()
+        fixture.scanners = {"job_scanner": smoke.AI_SCANNERS["job_scanner"]}
+        fixture.owned.side_effect = smoke.VerificationError("Container ownership mismatch")
+        with self.assertRaises(ValueError):
+            smoke.restart_scanners(fixture)
+        fixture.compose.assert_not_called()
+        original = {"Id": "owned", "RestartCount": 0, "State": {"Running": True, "OOMKilled": False, "StartedAt": "before"}}
+        restarted = {**original, "RestartCount": 1, "State": {**original["State"], "StartedAt": "after"}}
+        fixture.owned.side_effect = [{"job_scanner": original}, {"job_scanner": original}, {"job_scanner": restarted}]
+        with patch.object(smoke.time, "sleep"):
+            result = smoke.restart_scanners(fixture)
+        self.assertEqual(result, {"job_scanner": {"automatic_restart": True, "same_container": True}})
+        fixture.owned.side_effect = [{"job_scanner": original}, {"job_scanner": {**restarted, "Id": "foreign"}}]
+        with self.assertRaises(ValueError):
+            smoke.restart_scanners(fixture)
+
+    def test_permanent_mode_never_invokes_one_shot_recovery(self):
+        fixture = MagicMock()
+        fixture.scanners = {"job_scanner": smoke.AI_SCANNERS["job_scanner"]}
+        with self.assertRaises(ValueError):
+            ai.recover(fixture)
+        fixture.compose.assert_not_called()
+
+    def test_stage_gates_encode_postgres_boolean_scalars_as_json(self):
+        fixture = MagicMock()
+
+        def postgres(*command, **_):
+            if "psql" not in command:
+                return ""
+            statement = command[-1]
+            if "bool_and(" in statement:
+                # psql returns t/f for SQL bools, true/false for JSON bools.
+                return "true" if "to_json(" in statement else "t"
+            return '["pending"]'
+
+        fixture.compose.side_effect = postgres
+        with patch.object(ai, "scanner_notification_fault", return_value={"consumed_notifications": 1}) as boundary:
+            proof = ai.recover_with_scanners(fixture)
+        self.assertEqual(set(proof), {"job_scanner", "reply_scanner", "send_scanner"})
+        self.assertEqual(boundary.call_count, 3)
+
+    def test_scanner_fault_refuses_mismatched_queue_before_any_docker_action(self):
+        fixture = MagicMock()
+        fixture.scanners = smoke.AI_SCANNERS
+        for name, database, queue in (("job_scanner", 0, "celery"), ("send_scanner", 2, "telegram_ai"), ("foreign", 1, "telegram_send")):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                ai.scanner_notification_fault(fixture, name, database, queue)
+        fixture.owned.assert_not_called()
+        fixture.compose.assert_not_called()
+
     def test_controlled_fixture_requires_explicit_mode_and_fixed_synthetic_settings(self):
         good = controlled_config()
         smoke.validate_config(good, PROJECT, smoke.IMAGES, True)

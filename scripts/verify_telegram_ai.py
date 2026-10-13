@@ -185,7 +185,7 @@ def receiver_handler():
     return Receiver
 
 
-def ai_config(images):
+def ai_config(images, scanners=False):
     config = smoke.smoke_config(images)
     services = config["services"]
     # Preserve issuer sessions when deliberately restarting the fixture broker.
@@ -226,6 +226,12 @@ def ai_config(images):
                     "target": "/verification/verify_stack.py", "read_only": True}]
             service["volumes"] = [*service.get("volumes", []), {"type": "bind", "source": str(Path(__file__).resolve()),
                 "target": "/verification/verify_telegram_ai.py", "read_only": True}]
+    if scanners:
+        for name, (kind, module) in smoke.AI_SCANNERS.items():
+            source = services["webhook_service" if kind == "web" else "agent_service"]
+            services[name] = {**source, "init": True, "restart": "on-failure:2", "mem_limit": "128m",
+                              "healthcheck": {"disable": True}, "volumes": [],
+                              "command": ["python", "-m", module]}
     return config
 
 
@@ -236,12 +242,71 @@ def query(fixture, database, statement):
 
 
 def recover(fixture):
+    smoke.require(not fixture.scanners, "One-shot recovery forbidden in permanent scanner mode")
     for service, code in (
         ("webhook_service", "from scripts.recover_platform_outbox import scan_once; scan_once()"),
         ("agent_service", "from app.platform.processor import recover_jobs_once; from app.platform.replies import recover_replies_once; recover_jobs_once(); recover_replies_once()"),
         ("webhook_service", "from scripts.recover_telegram_answers import recover_answers_once; recover_answers_once()"),
     ):
         fixture.compose("exec", "-T", service, "python", "-c", code)
+
+
+def consume_notifications(fixture, database, queue):
+    smoke.require((database, queue) in {(2, "telegram_ai"), (2, "telegram_replies"), (1, "telegram_send")}, "Foreign queue fault rejected")
+    fixture.owned()
+    # Only new owned fixture notifications are consumed; durable rows stay intact.
+    code = "local n=0; while redis.call('LPOP',KEYS[1]) do n=n+1 end; return n"
+    count = int(fixture.compose("exec", "-T", "redis", "redis-cli", "-n", str(database), "EVAL", code, "1", queue))
+    smoke.require(count >= 1, "No notification available for recovery fault")
+    return count
+
+
+def scanner_notification_fault(fixture, name, database, queue):
+    markers = {"job_scanner": "Telegram job notification unavailable", "reply_scanner": "Telegram answer notification unavailable",
+               "send_scanner": "Telegram send notification unavailable"}
+    pairs = {"job_scanner": (2, "telegram_ai"), "reply_scanner": (2, "telegram_replies"), "send_scanner": (1, "telegram_send")}
+    smoke.require(name in fixture.scanners and pairs.get(name) == (database, queue), "Foreign scanner fault rejected")
+    fixture.stage = "broker notification recovery for " + name
+    fixture.owned()
+    fixture.compose("up", "-d", "--no-build", "--pull", "never", "--no-deps", name)
+    original = fixture.owned()[name]
+    before = fixture.compose("logs", "--no-color", "--tail", "100", name).count(markers[name])
+    fixture.compose("stop", "--timeout", "10", "redis")
+    smoke.wait_until(lambda: fixture.compose("logs", "--no-color", "--tail", "100", name).count(markers[name]) > before,
+                     "Permanent scanner did not observe notification failure", 30)
+    current = fixture.owned()[name]
+    smoke.require(current["State"]["Running"] and current["Id"] == original["Id"] and
+                  current["State"]["StartedAt"] == original["State"]["StartedAt"], "Scanner restarted on broker outage")
+    fixture.compose("start", "redis")
+    smoke.wait_until(lambda: fixture.owned()["redis"]["State"].get("Health", {}).get("Status") == "healthy", "Fixture broker did not recover")
+    smoke.wait_until(lambda: int(fixture.compose("exec", "-T", "redis", "redis-cli", "-n", str(database), "LLEN", queue)) > 0,
+                     "Scanner did not republish its durable notification", 30)
+    fixture.compose("stop", "--timeout", "10", name)
+    count = consume_notifications(fixture, database, queue)
+    return {"consumed_notifications": count, "broker_outage_observed": True, "same_running_process": True}
+
+
+def recover_with_scanners(fixture):
+    dropped = {}
+    fixture.compose("up", "-d", "--no-build", "--pull", "never", "--no-deps", "webhook_worker", "ingress_scanner")
+    smoke.wait_until(lambda: query(fixture, "webhook_test", "SELECT to_json(coalesce(bool_and(state='published'),false)) FROM platform_ingress_outbox"),
+                     "Permanent ingress scanner recovery failed", 90)
+    smoke.require(query(fixture, "agent_test", "SELECT json_agg(state) FROM telegram_ai_jobs") == ["pending"], "AI stage advanced before its recovery probe")
+    dropped["job_scanner"] = scanner_notification_fault(fixture, "job_scanner", 2, "telegram_ai")
+    fixture.compose("up", "-d", "--no-build", "--pull", "never", "--no-deps", "agent_worker", "job_scanner")
+    smoke.wait_until(lambda: query(fixture, "agent_test", "SELECT to_json(coalesce(bool_and(state='completed'),false)) FROM telegram_ai_jobs"),
+                     "Permanent job scanner recovery failed", 90)
+    smoke.require(query(fixture, "agent_test", "SELECT json_agg(state) FROM telegram_reply_outbox") == ["pending"], "Reply stage advanced before its recovery probe")
+    dropped["reply_scanner"] = scanner_notification_fault(fixture, "reply_scanner", 2, "telegram_replies")
+    fixture.compose("up", "-d", "--no-build", "--pull", "never", "--no-deps", "agent_publisher", "reply_scanner")
+    smoke.wait_until(lambda: query(fixture, "agent_test", "SELECT to_json(coalesce(bool_and(state='published'),false)) FROM telegram_reply_outbox"),
+                     "Permanent reply scanner recovery failed", 90)
+    smoke.require(query(fixture, "webhook_test", "SELECT json_agg(state) FROM telegram_answers") == ["pending"], "Send stage advanced before its recovery probe")
+    dropped["send_scanner"] = scanner_notification_fault(fixture, "send_scanner", 1, "telegram_send")
+    fixture.compose("up", "-d", "--no-build", "--pull", "never", "--no-deps", "webhook_sender", "send_scanner")
+    smoke.wait_until(lambda: query(fixture, "webhook_test", "SELECT to_json(coalesce(bool_and(state='succeeded' AND message_id=717),false)) FROM telegram_answers"),
+                     "Permanent send scanner recovery failed", 90)
+    return dropped
 
 
 def verify(fixture):
@@ -274,21 +339,41 @@ def verify(fixture):
         smoke.expect(http(destination, "POST", payload)[0], 401)
         smoke.expect(http(destination, "POST", payload, {"X-Webhook-Signature": "sha256=" + "0" * 64})[0], 401)
     print("PASS: real issuer tenant/bot, dry-run and closed unauthenticated/unscoped routes", flush=True)
+    scanner_proof = {}
+    if fixture.scanners:
+        fixture.stage = "permanent scanners PostgreSQL outage"
+        scanner_proof["processes"] = smoke.scanner_database_outage(fixture)
     fixture.stage = "broker outage admission"
-    fixture.owned()
+    broker_before = fixture.owned()
     fixture.compose("stop", "--timeout", "10", "redis")
     status, admitted = http(intake, "POST", payload, telegram_headers)
     smoke.expect(status, 202)
     event_id = str(UUID(admitted["event_id"]))
     pending = query(fixture, "webhook_test", "SELECT json_build_array(state,attempts) FROM platform_ingress_outbox")
     smoke.require(pending == ["pending", 0], "Outage lost durable ingress")
+    if fixture.scanners:
+        smoke.wait_until(lambda: "platform_broker_unavailable" in fixture.compose("logs", "--no-color", "--tail", "100", "ingress_scanner"),
+                         "Permanent ingress scanner did not observe broker outage", 30)
+        broker_after = fixture.owned()
+        smoke.require(all(broker_after[name]["State"]["Running"] and broker_after[name]["Id"] == broker_before[name]["Id"] and
+                          broker_after[name]["State"]["StartedAt"] == broker_before[name]["State"]["StartedAt"] for name in fixture.scanners),
+                      "Scanner exited or restarted on broker outage")
+        fixture.compose("stop", "--timeout", "10", *fixture.scanners)
+        scanner_proof["broker_outage_alive"] = True
     fixture.compose("start", "redis")
     fixture.stage = "controlled workers and recovery"
-    fixture.compose("up", "-d", "--no-build", "--pull", "never", "--no-deps", *WORKERS)
+    if fixture.scanners:
+        scanner_proof["consumed_notifications"] = recover_with_scanners(fixture)
+        fixture.stage = "permanent scanners automatic restart"
+        scanner_proof["restarts"] = smoke.restart_scanners(fixture)
+        time.sleep(6)
+    else:
+        fixture.compose("up", "-d", "--no-build", "--pull", "never", "--no-deps", *WORKERS)
     fixture.items = fixture.owned()
     deadline = time.monotonic() + 100
     while time.monotonic() < deadline:
-        recover(fixture)
+        if not fixture.scanners:
+            recover(fixture)
         state = query(fixture, "webhook_test", "SELECT coalesce(json_agg(json_build_array(state,message_id)), '[]'::json) FROM telegram_answers")
         if state == [["succeeded", 717]]:
             break
@@ -315,8 +400,11 @@ def verify(fixture):
     smoke.require(http(bot_route + "/deactivate", "POST", headers=foreign_headers)[0] in {403, 404}, "Foreign tenant mutation accepted")
     smoke.expect(http(bot_route + "/deactivate", "POST", headers=headers)[0], 200)
     smoke.expect(http(intake, "POST", {"update_id": 43}, telegram_headers)[0], 403)
-    for _ in range(2):
-        recover(fixture)
+    if fixture.scanners:
+        time.sleep(6)
+    else:
+        for _ in range(2):
+            recover(fixture)
     records = receipt()
     smoke.require({key: records[key] for key in ("groq", "send", "lost_receipts", "errors")} ==
                   {"groq": 1, "send": 1, "lost_receipts": 1, "errors": 0}, "Duplicate or invalid controlled effect")
@@ -324,13 +412,15 @@ def verify(fixture):
     print("PASS: broker/lost-receipt recovery, one job/usage/reply/canonical send, duplicate/conflict/tenant/deactivation", flush=True)
     return {"generation": 1, "usage": 1, "send": 1, "lost_receipts": 1, "publication_attempts": 2,
             "tenant_denial": True, "deactivation_denial": True, "legacy_tables_empty": True,
-            "send_marker_committed_before_effect": True, "recovery": "actual bounded one-shot scans"}
+            "send_marker_committed_before_effect": True, "recovery": "permanent CLI loops" if fixture.scanners else "actual bounded one-shot scans",
+            "scanner_proof": scanner_proof}
 
 
 def main(argv=None):
     smoke.require(not sys.flags.optimize, "Optimized Python is not supported")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--receiver", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--scanners", action="store_true", help="Verify permanent recovery loops with owned outages/restarts")
     for kind, image in smoke.IMAGES.items():
         parser.add_argument(f"--{'webhook' if kind == 'web' else kind}-image", default=image)
     args = parser.parse_args(argv)
@@ -344,7 +434,7 @@ def main(argv=None):
             server.server_close()
         return
     images = {kind: getattr(args, ("webhook" if kind == "web" else kind) + "_image") for kind in smoke.IMAGES}
-    fixture = smoke.Fixture(images, controlled_ai=True, config_factory=ai_config)
+    fixture = smoke.Fixture(images, controlled_ai=True, scanners=args.scanners, config_factory=ai_config)
     fixture.environment.update({key: secrets.token_hex(32) for key in ("AI_SERVICE_KEY", "AI_CONTEXT_KEY", "AI_INGRESS_KEY", "AI_REPLY_KEY")},
                                AI_BOT_KEY=Fernet.generate_key().decode(), SMOKE_CALLBACK_ORIGIN="http://127.0.0.1:8000")
     report = {"project": fixture.project, "images": fixture.images, "external_calls_enabled": False}
@@ -374,7 +464,7 @@ def main(argv=None):
             artifact.write_text(json.dumps(report, indent=2))
             print("RECEIPT: " + str(artifact), flush=True)
     # Keep this second acceptance sequential on the fixed-memory host.
-    smoke.main([option for kind in images for option in (f"--{'webhook' if kind == 'web' else kind}-image", images[kind])])
+    smoke.main([*(["--scanners"] if args.scanners else []), *[option for kind in images for option in (f"--{'webhook' if kind == 'web' else kind}-image", images[kind])]])
 
 
 if os.getenv("VERIFICATION_ROLE") in {"ingress", "generator", "sender"}:

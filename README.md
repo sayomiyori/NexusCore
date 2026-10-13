@@ -164,18 +164,21 @@ schema prerequisite and separately approved live provisioning, start with
 alone do not authorize live publication.
 
 For isolated controlled acceptance, use WebHook Manager's existing virtualenv
-and `TEST_DATABASE_URL` pointing to dedicated local PostgreSQL/pgvector test
-infrastructure (database name ending `_test`):
+and locally cached images. No external test database or host ports are needed:
 
 ```powershell
-../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_telegram_ai.py --webhook-image webhook-task7-canonical --agent-image agenthub-task8-check
+../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_telegram_ai.py
+../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_telegram_ai.py --scanners
 ```
 
-The script creates and retains fresh test databases, uses real issuer JWT/context
-and built service APIs/Celery/scanners, and intercepts only synthetic Telegram and
-Groq HTTP effects. It checks broker outage, lost admission receipt, one result/
-usage/send, duplicate/conflict rejection, deactivation and legacy table isolation.
-It reads no live credentials and makes no real Telegram setup/inference calls.
+Both commands own fresh internal Compose fixtures, use actual issuer/tenant/bot
+APIs, PostgreSQL and Celery, and intercept only synthetic Telegram/Groq effects.
+The AI fixture stops before the separate standalone acceptance starts. Scanner
+mode exercises the five real permanent recovery loops, owned PostgreSQL/broker
+outages, lost queue notifications and bounded automatic process restart.
+No real credentials, Telegram setup, provider inference or existing root data
+are used. See [isolated smoke and scanner acceptance](docs/isolated-smoke.md) for
+commands, ownership guards, receipt fields and verification limits.
 
 On 2026-10-07, this full controlled chain and the reused standalone stack smoke
 passed, including document upload/embedding storage and legacy webhook delivery.
@@ -226,13 +229,21 @@ Tenant isolation is not implemented across the entire platform. Legacy webhook
 egress restrictions and public deployment remain open.
 NexusCore is a development demo workspace.
 
-The root stack smoke check requires Python 3.12 or newer and the running Compose stack:
+The standalone stack smoke uses a new internal fixture with owned test storage,
+cached images, no host ports and an inspected numeric callback IP:
 
 ```powershell
-python scripts/verify_stack.py
+../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_stack.py
+../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_stack.py --scanners
 ```
 
-It verifies root API health, AuthFortress login/JWT/protected-route rejection paths, AgentHub upload/worker/storage, and signed synthetic ingress through the real WebHook Redis/Celery worker to a controlled local receiver. It creates and retains uniquely named demo records and performs no live Telegram or LLM calls. First API-key/source provisioning uses the existing repository layer inside the webhook container because public onboarding is incomplete.
+It checks health, auth/JWT denials, upload/worker/storage, signed callbacks,
+unsafe egress and sequential/concurrent admission. API-key/source provisioning
+uses the fixture's existing repository layer because public onboarding remains
+incomplete. Scanner mode additionally tests the real legacy delivery recovery
+loop. All exits stop owned containers and retain credential-free receipts and
+volumes. See [the isolated workflow](docs/isolated-smoke.md); existing root data,
+WSL settings and live Telegram/LLM are outside these commands.
 
 A passing root smoke still reproduces three gaps in the standalone route it uses
 (the opt-in platform intake has separate controlled acceptance):

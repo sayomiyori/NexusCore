@@ -26,8 +26,8 @@ from scripts import verify_stack as smoke
 PROJECT = "nexus-smoke-" + "a" * 32
 
 
-def resolved_config():
-    config = smoke.smoke_config(smoke.IMAGES)
+def resolved_config(scanners=False):
+    config = smoke.smoke_config(smoke.IMAGES, scanners)
     config["name"] = PROJECT
     config["networks"]["default"]["name"] = PROJECT + "_default"
     for key, volume in config["volumes"].items():
