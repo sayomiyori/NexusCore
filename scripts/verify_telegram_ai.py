@@ -1,79 +1,107 @@
-"""Isolated built-image Telegram/AI/reply verification with synthetic boundaries.
+"""Verify the built Telegram/AI/reply chain in a fresh owned internal fixture.
 
-Run with the WebHook Manager virtualenv. Creates and retains fresh guarded test
-databases; owns only uniquely named verification containers. No live credentials,
-Telegram setup or Groq inference. Normal service startup never loads this module.
+No external test database, published ports, root credentials or live calls.
+Only synthetic Telegram/Groq HTTP effects are intercepted; storage, issuer,
+queues, workers and recovery scans use the actual service implementation.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import ipaddress
 import json
 import os
 import secrets
-import socket
-import subprocess
+import signal
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import patch
-from uuid import UUID, uuid4
+from urllib.parse import urlsplit
+from uuid import UUID
 
 import httpx
-import psycopg
 from cryptography.fernet import Fernet
-from psycopg import sql
-from sqlalchemy.engine import make_url
+
+if __package__:
+    from . import verify_stack as smoke
+else:
+    import verify_stack as smoke
+
+TOKEN = "123456:synthetic_VERIFICATION-send-token"
+WORKERS = ("webhook_worker", "agent_worker", "agent_publisher", "webhook_sender")
+
+
+def controlled_origin():
+    value = os.environ["CONTROLLED_PROVIDER_URL"]
+    parsed = urlsplit(value)
+    address = ipaddress.IPv4Address(parsed.hostname or "")
+    smoke.require(parsed.scheme == "http" and parsed.port == 8000 and address.is_private
+                  and not address.is_loopback and not address.is_link_local
+                  and not address.is_unspecified and not address.is_multicast
+                  and not parsed.username and not parsed.password and not parsed.path
+                  and not parsed.query and not parsed.fragment, "Unsafe controlled provider origin")
+    return value
+
+
+def internal_request(request):
+    smoke.require(request.url.scheme == "http" and request.url.host in {
+        "auth_service", "webhook_service", "agent_service"} and request.url.port == 8000
+        and not request.url.userinfo, "Unexpected controlled HTTP destination")
 
 
 def create_webhook_app():
-    """Override only synthetic Telegram HTTP; retain real auth and storage."""
+    """Intercept synthetic Telegram setup; retain real issuer and storage."""
     from src.api.main import app
     from src.api.v1.dependencies.platform import get_telegram
     from src.infrastructure.platform.clients import TelegramClient
 
     def boundary(request):
-        assert request.url.host == "api.telegram.org"
-        assert "/bot123456:synthetic_VERIFICATION-send-token/" in str(request.url)
         method = request.url.path.rsplit("/", 1)[-1]
-        with httpx.Client(timeout=5, trust_env=False) as client:
-            response = client.post(
-                os.environ["CONTROLLED_PROVIDER_URL"] + "/controlled/" + method,
-                json=json.loads(request.content) if request.content else {},
-            )
+        smoke.require(str(request.url) == f"https://api.telegram.org/bot{TOKEN}/{method}"
+                      and method in {"getMe", "setWebhook"}, "Non-synthetic Telegram setup refused")
+        with httpx.Client(timeout=5, trust_env=False, follow_redirects=False) as client:
+            response = client.post(controlled_origin() + "/controlled/" + method,
+                                   json=json.loads(request.content) if request.content else {})
         return httpx.Response(response.status_code, json=response.json())
 
-    app.dependency_overrides[get_telegram] = lambda: TelegramClient(
-        transport=httpx.MockTransport(boundary)
-    )
+    app.dependency_overrides[get_telegram] = lambda: TelegramClient(transport=httpx.MockTransport(boundary))
     return app
 
 
 def install_worker_boundary():
-    """Actual HTTP context/admission; intercept only synthetic provider effects."""
+    """Intercept only provider effects and one deliberately lost admission receipt."""
     original = httpx.AsyncClient
     lost_receipt = False
 
     async def boundary(request):
         nonlocal lost_receipt
+        role = os.environ["VERIFICATION_ROLE"]
+        target = None
         if request.url.host == "api.groq.com":
-            assert str(request.url) == "https://api.groq.com/openai/v1/chat/completions"
-            assert (
-                request.headers["Authorization"] == "Bearer synthetic-groq-verification"
-            )
-            target = os.environ["CONTROLLED_PROVIDER_URL"] + "/groq"
-            async with original(timeout=20, trust_env=False) as client:
-                return await client.post(target, content=request.content)
-        async with original(timeout=10, trust_env=False) as client:
+            smoke.require(role == "generator" and str(request.url) ==
+                          "https://api.groq.com/openai/v1/chat/completions" and
+                          request.headers["Authorization"] == "Bearer synthetic-groq-verification",
+                          "Non-synthetic Groq request refused")
+            target = "/groq"
+        elif request.url.host == "api.telegram.org":
+            smoke.require(role == "sender" and str(request.url) ==
+                          f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                          "Non-synthetic Telegram send refused")
+            target = "/send"
+        if target:
+            async with original(timeout=20, trust_env=False, follow_redirects=False) as client:
+                return await client.post(controlled_origin() + target, content=request.content,
+                                         headers={"Content-Type": "application/json"})
+        internal_request(request)
+        async with original(timeout=10, trust_env=False, follow_redirects=False) as client:
             response = await client.send(request)
-        if (
-            os.environ["VERIFICATION_ROLE"] == "ingress"
-            and request.url.path == "/internal/v1/telegram/updates"
-            and response.status_code == 202
-            and not lost_receipt
-        ):
+        if role == "ingress" and request.url.path == "/internal/v1/telegram/updates" and response.status_code == 202 and not lost_receipt:
             lost_receipt = True
+            async with original(timeout=5, trust_env=False, follow_redirects=False) as client:
+                await client.post(controlled_origin() + "/lost-receipt", json={})
             return httpx.Response(503)
         return response
 
@@ -85,617 +113,281 @@ def install_worker_boundary():
     httpx.AsyncClient = ControlledClient
 
 
-def run(command, *, env=None, cwd=None, timeout=120):
-    result = subprocess.run(
-        command, env=env, cwd=cwd, capture_output=True, timeout=timeout, check=False
-    )
-    if result.returncode:
-        raise RuntimeError(
-            "Verification command failed; captured output withheld: " + command[0]
-        )
-    return result.stdout.decode().strip()
-
-
-def free_port():
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return listener.getsockname()[1]
-
-
-def wait_for(check, seconds=60):
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        try:
-            if check():
-                return
-        except (httpx.HTTPError, psycopg.OperationalError):
-            pass
-        time.sleep(0.2)
-    raise AssertionError("Controlled verification deadline exceeded")
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--webhook-image", default="webhook-task7-canonical")
-    parser.add_argument("--auth-image", default="authfortress-internal-status:verification")
-    parser.add_argument("--agent-image", default="agenthub-task8-check")
-    args = parser.parse_args()
-    root = Path(__file__).resolve().parents[1]
-    tag = uuid4().hex
-    url = make_url(os.environ["TEST_DATABASE_URL"])
-    assert url.host in {"127.0.0.1", "localhost"} and url.database.endswith("_test")
-    params = {
-        "host": url.host,
-        "port": url.port,
-        "user": url.username,
-        "password": url.password,
-    }
-    databases = {
-        service: f"nexus_ai_{service}_{tag}_test"
-        for service in ("auth", "web", "agent")
-    }
-    with psycopg.connect(dbname="postgres", autocommit=True, **params) as db:
-        assert db.execute("SELECT current_database()").fetchone()[0] == "postgres"
-        for name in databases.values():
-            assert len(name) <= 63 and name.endswith(tag + "_test")
-            db.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
-    containers, files = [], []
-    uploads = root / ".venv" / ("telegram-ai-uploads-" + tag)
-    uploads.mkdir(parents=True)
-    ports = {
-        key: free_port() for key in ("auth", "web", "agent", "redis", "auth-redis")
-    }
-    service_key, context_key, ingress_key, reply_key = (
-        secrets.token_urlsafe(32) for _ in range(4)
-    )
-    setup, calls = [], {"groq": 0, "send": 0}
+def receiver_handler():
+    records = {"setup": [], "groq": 0, "send": 0, "lost_receipts": 0, "errors": 0}
+    lock = threading.Lock()
 
     class Receiver(BaseHTTPRequestHandler):
-        def log_message(self, *_):
-            pass
-
-        def do_POST(self):
-            payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            if self.path == "/controlled/getMe":
-                receipt = {
-                    "ok": True,
-                    "result": {
-                        "id": 123456,
-                        "is_bot": True,
-                        "username": "controlled_bot",
-                    },
-                }
-            elif self.path == "/controlled/setWebhook":
-                setup.append(payload)
-                receipt = {"ok": True, "result": True}
-            elif self.path == "/groq":
-                assert payload["model"] == "openai/gpt-oss-20b"
-                assert (
-                    payload["max_completion_tokens"] == 1024 and "tools" not in payload
-                )
-                assert payload["messages"][-1] == {
-                    "role": "user",
-                    "content": "Synthetic question",
-                }
-                calls["groq"] += 1
-                receipt = {
-                    "id": "synthetic",
-                    "object": "chat.completion",
-                    "created": 1,
-                    "model": payload["model"],
-                    "choices": [
-                        {
-                            "index": 0,
-                            "finish_reason": "stop",
-                            "message": {
-                                "role": "assistant",
-                                "content": "Synthetic sender answer",
-                            },
-                        }
-                    ],
-                    "usage": {
-                        "prompt_tokens": 10,
-                        "completion_tokens": 5,
-                        "total_tokens": 15,
-                    },
-                }
-            elif self.path == "/send":
-                assert payload == {"chat_id": 17, "text": "Synthetic sender answer"}
-                with psycopg.connect(dbname=databases["web"], **params) as db:
-                    state, marker = db.execute(
-                        "SELECT state,send_started_at FROM telegram_answers"
-                    ).fetchone()
-                    assert state == "processing" and marker is not None
-                calls["send"] += 1
-                receipt = {
-                    "ok": True,
-                    "result": {"message_id": 717, "chat": {"id": 17}},
-                }
-            else:
-                raise AssertionError("Unexpected controlled destination")
-            data = json.dumps(receipt).encode()
-            self.send_response(200)
+        def respond(self, status, payload):
+            data = json.dumps(payload).encode()
+            self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
 
-    receiver = ThreadingHTTPServer(("0.0.0.0", 0), Receiver)
-    threading.Thread(target=receiver.serve_forever, daemon=True).start()
-    provider = f"http://host.docker.internal:{receiver.server_address[1]}"
+        def do_GET(self):
+            if self.path == "/health":
+                self.respond(200, {"status": "ok"})
+            elif self.path == "/receipt":
+                with lock:
+                    self.respond(200, records)
+            else:
+                self.respond(404, {})
 
-    def container(name, image, command, environment=None, publish=None):
-        identity = "ai-verify-" + tag[:12] + "-" + name
-        options = [
-            "docker",
-            "run",
-            "-d",
-            "--name",
-            identity,
-            "--user",
-            "65534:65534",
-            "--add-host",
-            "auth_service:host-gateway",
-            "--add-host",
-            "agent_service:host-gateway",
-            "--add-host",
-            "webhook_service:host-gateway",
-            "-v",
-            str(Path(__file__).resolve()).replace("\\", "/")
-            + ":/verification/verify_telegram_ai.py:ro",
-        ]
-        if publish:
-            options += ["-p", publish]
-        if image == args.agent_image:
-            options += ["-v", uploads.as_posix() + ":/verification_uploads"]
-        for key in environment or {}:
-            options += ["-e", key]
-        run(options + [image, *command], env={**os.environ, **(environment or {})})
-        containers.append(identity)
-        return identity
+        def do_POST(self):
+            try:
+                size = int(self.headers.get("Content-Length", "0"))
+                smoke.require(0 < size <= 65536, "Invalid controlled request size")
+                payload = json.loads(self.rfile.read(size))
+                with lock:
+                    if self.path == "/controlled/getMe":
+                        reply = {"ok": True, "result": {"id": 123456, "is_bot": True, "username": "controlled_bot"}}
+                    elif self.path == "/controlled/setWebhook":
+                        records["setup"].append(payload)
+                        reply = {"ok": True, "result": True}
+                    elif self.path == "/lost-receipt":
+                        records["lost_receipts"] += 1
+                        reply = {}
+                    elif self.path == "/groq":
+                        smoke.require(payload["model"] == "openai/gpt-oss-20b" and
+                                      payload["max_completion_tokens"] == 1024 and "tools" not in payload and
+                                      payload["messages"][-1] == {"role": "user", "content": "Synthetic question"},
+                                      "Unexpected controlled generation")
+                        records["groq"] += 1
+                        reply = {"id": "synthetic", "object": "chat.completion", "created": 1,
+                                 "model": payload["model"], "choices": [{"index": 0, "finish_reason": "stop",
+                                 "message": {"role": "assistant", "content": "Synthetic sender answer"}}],
+                                 "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
+                    elif self.path == "/send":
+                        smoke.require(payload == {"chat_id": 17, "text": "Synthetic sender answer"}, "Unexpected canonical send")
+                        from sqlalchemy import create_engine, text
+                        engine = create_engine(os.environ["DATABASE_URL"].replace("+asyncpg", "+psycopg"))
+                        try:
+                            with engine.connect() as connection:
+                                state = connection.execute(text("SELECT state,send_started_at FROM telegram_answers")).one()
+                                smoke.require(state[0] == "processing" and state[1] is not None, "Send marker not committed before effect")
+                        finally:
+                            engine.dispose()
+                        records["send"] += 1
+                        reply = {"ok": True, "result": {"message_id": 717, "chat": {"id": 17}}}
+                    else:
+                        raise smoke.VerificationError("Unexpected controlled route")
+                self.respond(200, reply)
+            except Exception:  # noqa: BLE001 - Receiver errors must not disclose test credentials.
+                with lock:
+                    records["errors"] += 1
+                self.respond(400, {})
 
-    def local_url(service, driver):
-        return url.set(
-            database=databases[service], drivername="postgresql+" + driver
-        ).render_as_string(hide_password=False)
+        def log_message(self, *_):
+            pass
 
-    def runtime_url(service, driver):
-        return url.set(
-            database=databases[service],
-            drivername="postgresql+" + driver,
-            host="host.docker.internal",
-        ).render_as_string(hide_password=False)
+    return Receiver
 
+
+def ai_config(images):
+    config = smoke.smoke_config(images)
+    services = config["services"]
+    # Preserve issuer sessions when deliberately restarting the fixture broker.
+    services["redis"]["command"] = ["redis-server", "--save", "", "--appendonly", "yes", "--appendfsync", "always"]
+    auth = services["auth_service"]["environment"]
+    auth.update(dict.fromkeys(smoke.EXTERNAL, ""), AUTHFORTRESS_WEBHOOK_SERVICE_KEY="${AI_SERVICE_KEY}")
+    web = {**services["webhook_service"]["environment"], "PLATFORM_BOTS_ENABLED": "true",
+           "PLATFORM_TELEGRAM_ENABLED": "true", "TELEGRAM_REPLIES_ENABLED": "true",
+           "AUTHFORTRESS_BASE_URL": "http://auth_service:8000", "AGENTHUB_BASE_URL": "http://agent_service:8000",
+           "AUTHFORTRESS_WEBHOOK_SERVICE_KEY": "${AI_SERVICE_KEY}", "WEBHOOK_AGENT_CONTEXT_KEY": "${AI_CONTEXT_KEY}",
+           "WEBHOOK_AGENT_INGRESS_KEY": "${AI_INGRESS_KEY}", "AGENT_WEBHOOK_REPLY_KEY": "${AI_REPLY_KEY}",
+           "BOT_CREDENTIALS_KEY": "${AI_BOT_KEY}", "TELEGRAM_WEBHOOK_ORIGIN": "https://demo.example.com",
+           "CONTROLLED_PROVIDER_URL": "${SMOKE_CALLBACK_ORIGIN}", "PYTHONPATH": "/verification:/app"}
+    agent = {**services["agent_service"]["environment"], "TELEGRAM_AI_ENABLED": "true",
+             "TELEGRAM_AI_MODEL": "openai/gpt-oss-20b", "WEBHOOK_INTERNAL_URL": "http://webhook_service:8000",
+             "WEBHOOK_AGENT_SERVICE_KEY": "${AI_CONTEXT_KEY}", "WEBHOOK_AGENT_INGRESS_KEY": "${AI_INGRESS_KEY}",
+             "AGENT_WEBHOOK_REPLY_KEY": "${AI_REPLY_KEY}", "GROQ_API_KEY": "synthetic-groq-verification",
+             "CONTROLLED_PROVIDER_URL": "${SMOKE_CALLBACK_ORIGIN}"}
+    services["webhook_service"]["environment"] = web
+    services["webhook_service"]["command"] = ["sh", "-c", "python -m alembic upgrade head && exec uvicorn verify_telegram_ai:create_webhook_app --factory --host 0.0.0.0 --port 8000 --no-access-log"]
+    services["agent_service"]["environment"] = agent
+    services["callback"]["environment"].update(DATABASE_URL=web["DATABASE_URL"], VERIFICATION_ROLE="receiver")
+    services["callback"]["command"] = ["python", "/verification/verify_telegram_ai.py", "--receiver"]
+    for name, source, role, module, queue in (
+        ("webhook_worker", "webhook_worker", "ingress", "verify_telegram_ai:celery_app", "celery"),
+        ("agent_worker", "agent_worker", "generator", "verify_telegram_ai:celery_app", "telegram_ai"),
+        ("agent_publisher", "agent_worker", "publisher", "app.workers.telegram_reply_worker:celery_app", "telegram_replies"),
+        ("webhook_sender", "webhook_worker", "sender", "verify_telegram_ai:celery_app", "telegram_send"),
+    ):
+        services[name] = {**services[source], "environment": {**(web if name.startswith("webhook") else agent), "VERIFICATION_ROLE": role},
+                          "command": ["celery", "-A", module, "worker", "--loglevel=warning", "--concurrency=1", "--queues=" + queue]}
+    for name, service in services.items():
+        if name not in {"postgres", "redis", "auth_service"}:
+            if name == "agent_publisher":
+                service["volumes"] = []
+            if name not in {"callback", "agent_service"}:
+                service["volumes"] = [*service.get("volumes", []), {"type": "bind", "source": str(Path(smoke.__file__).resolve()),
+                    "target": "/verification/verify_stack.py", "read_only": True}]
+            service["volumes"] = [*service.get("volumes", []), {"type": "bind", "source": str(Path(__file__).resolve()),
+                "target": "/verification/verify_telegram_ai.py", "read_only": True}]
+    return config
+
+
+def query(fixture, database, statement):
+    smoke.require(database in {"auth_test", "webhook_test", "agent_test"}, "Foreign database rejected")
+    return json.loads(fixture.compose("exec", "-T", "postgres", "psql", "-U", "smoke", "-d", database,
+                                     "-At", "-v", "ON_ERROR_STOP=1", "-c", statement))
+
+
+def recover(fixture):
+    for service, code in (
+        ("webhook_service", "from scripts.recover_platform_outbox import scan_once; scan_once()"),
+        ("agent_service", "from app.platform.processor import recover_jobs_once; from app.platform.replies import recover_replies_once; recover_jobs_once(); recover_replies_once()"),
+        ("webhook_service", "from scripts.recover_telegram_answers import recover_answers_once; recover_answers_once()"),
+    ):
+        fixture.compose("exec", "-T", service, "python", "-c", code)
+
+
+def verify(fixture):
+    auth, web, agent = (fixture.url(name) for name in ("auth_service", "webhook_service", "agent_service"))
+    http = fixture.http
+    receipt = lambda: http(fixture.callback_origin + "/receipt")[1]
+    account = {"email": f"ai-{fixture.project}@example.com", "username": "verification", "password": "Aa1!" + secrets.token_urlsafe(24)}
+    smoke.expect(http(auth + "/api/v1/auth/register", "POST", account)[0], 200)
+    status, login = http(auth + "/api/v1/auth/login", "POST", account)
+    smoke.expect(status, 200)
+    headers = {"Authorization": "Bearer " + login["access_token"]}
+    status, tenant = http(auth + "/api/v1/tenants", "POST", {"name": "AI verification"}, headers)
+    smoke.expect(status, 201)
+    route = web + "/api/v1/tenants/" + str(UUID(tenant["id"])) + "/bots"
+    status, bot = http(route, "POST", {"name": "Controlled bot", "token": TOKEN}, headers)
+    smoke.expect(status, 201)
+    bot_route = route + "/" + str(UUID(bot["id"]))
+    smoke.expect(http(bot_route + "/webhook", "POST", {"dry_run": True}, headers)[0], 200)
+    smoke.require(not receipt()["setup"], "Dry-run caused a setup effect")
+    smoke.expect(http(bot_route + "/webhook", "POST", {"dry_run": False}, headers)[0], 200)
+    setup = receipt()["setup"]
+    smoke.require(len(setup) == 1, "Duplicate controlled setup")
+    telegram_headers = {"X-Telegram-Bot-Api-Secret-Token": setup[0]["secret_token"]}
+    intake = web + "/webhooks/telegram/" + bot["id"]
+    payload = {"update_id": 42, "message": {"message_id": 9, "chat": {"id": 17, "type": "private"}, "text": "Synthetic question"}}
+    for path in ("/mcp", "/mcp/sse", "/api/v1/documents", "/api/v1/conversations", "/api/v1/usage"):
+        smoke.expect(http(agent + path)[0], 404)
+    smoke.expect(http(intake, "POST", payload)[0], 401)
+    for destination in (agent + "/internal/v1/telegram/updates", web + "/internal/v1/telegram/answers"):
+        smoke.expect(http(destination, "POST", payload)[0], 401)
+        smoke.expect(http(destination, "POST", payload, {"X-Webhook-Signature": "sha256=" + "0" * 64})[0], 401)
+    print("PASS: real issuer tenant/bot, dry-run and closed unauthenticated/unscoped routes", flush=True)
+    fixture.stage = "broker outage admission"
+    fixture.owned()
+    fixture.compose("stop", "--timeout", "10", "redis")
+    status, admitted = http(intake, "POST", payload, telegram_headers)
+    smoke.expect(status, 202)
+    event_id = str(UUID(admitted["event_id"]))
+    pending = query(fixture, "webhook_test", "SELECT json_build_array(state,attempts) FROM platform_ingress_outbox")
+    smoke.require(pending == ["pending", 0], "Outage lost durable ingress")
+    fixture.compose("start", "redis")
+    fixture.stage = "controlled workers and recovery"
+    fixture.compose("up", "-d", "--no-build", "--pull", "never", "--no-deps", *WORKERS)
+    fixture.items = fixture.owned()
+    deadline = time.monotonic() + 100
+    while time.monotonic() < deadline:
+        recover(fixture)
+        state = query(fixture, "webhook_test", "SELECT coalesce(json_agg(json_build_array(state,message_id)), '[]'::json) FROM telegram_answers")
+        if state == [["succeeded", 717]]:
+            break
+        smoke.require(not any(row[0] in {"unknown", "failed"} for row in state), "Controlled send reached a terminal failure")
+        time.sleep(1)
+    smoke.require(state == [["succeeded", 717]], "Controlled reply deadline exceeded")
+    fixture.stage = "duplicate, tenant and deactivation checks"
+    smoke.expect(http(intake, "POST", payload, telegram_headers)[0], 200)
+    changed = {**payload, "message": {**payload["message"], "text": "Changed"}}
+    smoke.expect(http(intake, "POST", changed, telegram_headers)[0], 409)
+    original = query(fixture, "webhook_test", "SELECT json_build_array(state,attempts,published_job_id) FROM platform_ingress_outbox")
+    smoke.require(original[:2] == ["published", 2], "Lost admission receipt was not recovered once")
+    job = query(fixture, "agent_test", "SELECT json_build_array(id,state,answer) FROM telegram_ai_jobs WHERE event_id='" + event_id + "'")
+    smoke.require(job == [original[2], "completed", "Synthetic sender answer"], "Canonical result mismatch")
+    counts = query(fixture, "agent_test", "SELECT json_build_object('jobs',(SELECT count(*) FROM telegram_ai_jobs),'usage',(SELECT count(*) FROM telegram_ai_usage),'reply_states',(SELECT json_agg(state) FROM telegram_reply_outbox),'conversations',(SELECT count(*) FROM conversations),'messages',(SELECT count(*) FROM messages),'legacy_usage',(SELECT count(*) FROM llm_usage_records))")
+    smoke.require(counts == {"jobs": 1, "usage": 1, "reply_states": ["published"], "conversations": 0, "messages": 0, "legacy_usage": 0}, "Scoped/legacy result counts differ")
+    foreign_account = {**account, "email": "foreign-" + fixture.project + "@example.com", "username": "foreign"}
+    smoke.expect(http(auth + "/api/v1/auth/register", "POST", foreign_account)[0], 200)
+    status, foreign_login = http(auth + "/api/v1/auth/login", "POST", foreign_account)
+    smoke.expect(status, 200)
+    foreign_headers = {"Authorization": "Bearer " + foreign_login["access_token"]}
+    smoke.expect(http(auth + "/api/v1/tenants", "POST", {"name": "Foreign verification"}, foreign_headers)[0], 201)
+    smoke.require(http(bot_route, headers=foreign_headers)[0] in {403, 404}, "Foreign tenant read accepted")
+    smoke.require(http(bot_route + "/deactivate", "POST", headers=foreign_headers)[0] in {403, 404}, "Foreign tenant mutation accepted")
+    smoke.expect(http(bot_route + "/deactivate", "POST", headers=headers)[0], 200)
+    smoke.expect(http(intake, "POST", {"update_id": 43}, telegram_headers)[0], 403)
+    for _ in range(2):
+        recover(fixture)
+    records = receipt()
+    smoke.require({key: records[key] for key in ("groq", "send", "lost_receipts", "errors")} ==
+                  {"groq": 1, "send": 1, "lost_receipts": 1, "errors": 0}, "Duplicate or invalid controlled effect")
+    smoke.require(query(fixture, "webhook_test", "SELECT count(*) FROM telegram_answers") == 1, "Duplicate send intent")
+    print("PASS: broker/lost-receipt recovery, one job/usage/reply/canonical send, duplicate/conflict/tenant/deactivation", flush=True)
+    return {"generation": 1, "usage": 1, "send": 1, "lost_receipts": 1, "publication_attempts": 2,
+            "tenant_denial": True, "deactivation_denial": True, "legacy_tables_empty": True,
+            "send_marker_committed_before_effect": True, "recovery": "actual bounded one-shot scans"}
+
+
+def main(argv=None):
+    smoke.require(not sys.flags.optimize, "Optimized Python is not supported")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--receiver", action="store_true", help=argparse.SUPPRESS)
+    for kind, image in smoke.IMAGES.items():
+        parser.add_argument(f"--{'webhook' if kind == 'web' else kind}-image", default=image)
+    args = parser.parse_args(argv)
+    if args.receiver:
+        smoke.require(os.getenv("VERIFICATION_ROLE") == "receiver", "Receiver is fixture-only")
+        server = ThreadingHTTPServer(("0.0.0.0", 8000), receiver_handler())
+        signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown).start())
+        try:
+            server.serve_forever()
+        finally:
+            server.server_close()
+        return
+    images = {kind: getattr(args, ("webhook" if kind == "web" else kind) + "_image") for kind in smoke.IMAGES}
+    fixture = smoke.Fixture(images, controlled_ai=True, config_factory=ai_config)
+    fixture.environment.update({key: secrets.token_hex(32) for key in ("AI_SERVICE_KEY", "AI_CONTEXT_KEY", "AI_INGRESS_KEY", "AI_REPLY_KEY")},
+                               AI_BOT_KEY=Fernet.generate_key().decode(), SMOKE_CALLBACK_ORIGIN="http://127.0.0.1:8000")
+    report = {"project": fixture.project, "images": fixture.images, "external_calls_enabled": False}
     try:
-        broker = container(
-            "redis", "redis:7-alpine", [], publish=f"127.0.0.1:{ports['redis']}:6379"
-        )
-        container(
-            "auth-redis",
-            "redis:7-alpine",
-            [],
-            publish=f"127.0.0.1:{ports['auth-redis']}:6379",
-        )
-        shared = {
-            "REDIS_URL": f"redis://host.docker.internal:{ports['redis']}/0",
-            "CELERY_BROKER_URL": f"redis://host.docker.internal:{ports['redis']}/0",
-            "SECRET_KEY": secrets.token_urlsafe(32),
-            "SENTRY_DSN": "",
-            "CONTROLLED_PROVIDER_URL": provider,
-            "PYTHONPATH": "/verification:/app",
-        }
-        for service, folder, driver in (
-            ("auth", "AuthFortress", "psycopg2"),
-            ("web", "WebHook_Manager", "asyncpg"),
-            ("agent", "AgentHub", "psycopg"),
-        ):
-            repo = root.parent / folder
-            python = repo / ".venv/Scripts/python.exe"
-            if not python.exists():
-                python = repo / ".venv/bin/python"
-            environment = {
-                **os.environ,
-                **shared,
-                "DATABASE_URL": local_url(service, driver),
-                "REDIS_URL": f"redis://127.0.0.1:{ports['redis']}/1",
-                "JWT_SECRET_KEY": secrets.token_urlsafe(32),
-                "PLATFORM_BOTS_ENABLED": "false",
-                "PLATFORM_TELEGRAM_ENABLED": "false",
-                "TELEGRAM_REPLIES_ENABLED": "false",
-                "TELEGRAM_AI_ENABLED": "false",
-            }
-            run(
-                [str(python), "-m", "alembic", "upgrade", "head"],
-                env=environment,
-                cwd=repo,
-            )
-            run([str(python), "-m", "alembic", "check"], env=environment, cwd=repo)
-        auth_env = dict(
-            shared,
-            REDIS_URL=f"redis://host.docker.internal:{ports['auth-redis']}/0",
-            DATABASE_URL=runtime_url("auth", "psycopg2"),
-            JWT_SECRET_KEY=secrets.token_urlsafe(32),
-            AUTHFORTRESS_WEBHOOK_SERVICE_KEY=service_key,
-        )
-        # The existing identity image has the independently verified tenant endpoint.
-        container(
-            "auth",
-            args.auth_image,
-            [
-                "uvicorn",
-                "app.main:app",
-                "--host",
-                "0.0.0.0",
-                "--port",
-                "8000",
-                "--no-access-log",
-            ],
-            auth_env,
-            f"127.0.0.1:{ports['auth']}:8000",
-        )
-        web_env = dict(
-            shared,
-            DATABASE_URL=runtime_url("web", "asyncpg"),
-            PLATFORM_BOTS_ENABLED="true",
-            PLATFORM_TELEGRAM_ENABLED="true",
-            TELEGRAM_REPLIES_ENABLED="true",
-            AUTHFORTRESS_BASE_URL=f"http://auth_service:{ports['auth']}",
-            AUTHFORTRESS_WEBHOOK_SERVICE_KEY=service_key,
-            WEBHOOK_AGENT_CONTEXT_KEY=context_key,
-            WEBHOOK_AGENT_INGRESS_KEY=ingress_key,
-            AGENT_WEBHOOK_REPLY_KEY=reply_key,
-            BOT_CREDENTIALS_KEY=Fernet.generate_key().decode(),
-            TELEGRAM_WEBHOOK_ORIGIN="https://demo.example.com",
-            AGENTHUB_BASE_URL=f"http://agent_service:{ports['agent']}",
-        )
-        agent_env = dict(
-            shared,
-            REDIS_URL=f"redis://host.docker.internal:{ports['redis']}/2",
-            CELERY_BROKER_URL=f"redis://host.docker.internal:{ports['redis']}/2",
-            UPLOAD_DIR="/verification_uploads",
-            DATABASE_URL=runtime_url("agent", "psycopg"),
-            TELEGRAM_AI_ENABLED="true",
-            TELEGRAM_AI_MODEL="openai/gpt-oss-20b",
-            WEBHOOK_INTERNAL_URL=f"http://webhook_service:{ports['web']}",
-            WEBHOOK_AGENT_SERVICE_KEY=context_key,
-            WEBHOOK_AGENT_INGRESS_KEY=ingress_key,
-            AGENT_WEBHOOK_REPLY_KEY=reply_key,
-            GROQ_API_KEY="synthetic-groq-verification",
-            OPENAI_API_KEY="",
-            GEMINI_API_KEY="",
-            ANTHROPIC_API_KEY="",
-        )
-        web_container = container(
-            "web",
-            args.webhook_image,
-            [
-                "uvicorn",
-                "verify_telegram_ai:create_webhook_app",
-                "--factory",
-                "--host",
-                "0.0.0.0",
-                "--port",
-                "8000",
-                "--no-access-log",
-            ],
-            web_env,
-            f"127.0.0.1:{ports['web']}:8000",
-        )
-        container(
-            "agent",
-            args.agent_image,
-            [
-                "uvicorn",
-                "app.main:app",
-                "--host",
-                "0.0.0.0",
-                "--port",
-                "8000",
-                "--no-access-log",
-            ],
-            agent_env,
-            f"127.0.0.1:{ports['agent']}:8000",
-        )
-        with httpx.Client(timeout=15, trust_env=False) as client:
-            auth = f"http://127.0.0.1:{ports['auth']}"
-            web = f"http://127.0.0.1:{ports['web']}"
-            agent = f"http://127.0.0.1:{ports['agent']}"
-            for base, path in (
-                (auth, "/health"),
-                (web, "/health/ready"),
-                (agent, "/health"),
-            ):
-                wait_for(
-                    lambda base=base, path=path: (
-                        client.get(base + path).status_code == 200
-                    )
-                )
-            account = {
-                "email": f"ai-{tag}@example.com",
-                "username": "verification",
-                "password": "Aa1!" + secrets.token_urlsafe(24),
-            }
-            assert (
-                client.post(auth + "/api/v1/auth/register", json=account).status_code
-                == 200
-            )
-            login = client.post(auth + "/api/v1/auth/login", json=account)
-            assert login.status_code == 200
-            headers = {"Authorization": "Bearer " + login.json()["access_token"]}
-            tenant = client.post(
-                auth + "/api/v1/tenants",
-                headers=headers,
-                json={"name": "AI verification"},
-            )
-            assert tenant.status_code == 201
-            route = web + "/api/v1/tenants/" + tenant.json()["id"] + "/bots"
-            bot = client.post(
-                route,
-                headers=headers,
-                json={
-                    "name": "Controlled bot",
-                    "token": "123456:synthetic_VERIFICATION-send-token",
-                },
-            )
-            assert bot.status_code == 201
-            bot_route = route + "/" + bot.json()["id"]
-            assert (
-                client.post(
-                    bot_route + "/webhook", headers=headers, json={"dry_run": True}
-                ).status_code
-                == 200
-            )
-            assert not setup
-            assert (
-                client.post(
-                    bot_route + "/webhook", headers=headers, json={"dry_run": False}
-                ).status_code
-                == 200
-            )
-            assert len(setup) == 1
-            telegram_headers = {
-                "X-Telegram-Bot-Api-Secret-Token": setup[0]["secret_token"]
-            }
-            intake = web + "/webhooks/telegram/" + bot.json()["id"]
-            payload = {
-                "update_id": 42,
-                "message": {
-                    "message_id": 9,
-                    "chat": {"id": 17, "type": "private"},
-                    "text": "Synthetic question",
-                },
-            }
-            run(["docker", "stop", broker])
-            admitted = client.post(intake, headers=telegram_headers, json=payload)
-            assert admitted.status_code == 202
-            event_id = UUID(admitted.json()["event_id"])
-            with psycopg.connect(dbname=databases["web"], **params) as db:
-                assert db.execute(
-                    "SELECT state,attempts FROM platform_ingress_outbox"
-                ).fetchone() == ("pending", 0)
-            run(["docker", "start", broker])
-            commands = (
-                (
-                    "ingress-worker",
-                    args.webhook_image,
-                    dict(web_env, VERIFICATION_ROLE="ingress"),
-                    [
-                        "celery",
-                        "-A",
-                        "verify_telegram_ai:celery_app",
-                        "worker",
-                        "--loglevel=warning",
-                        "--concurrency=1",
-                        "--queues=celery",
-                    ],
-                ),
-                (
-                    "ingress-scanner",
-                    args.webhook_image,
-                    web_env,
-                    ["python", "-m", "scripts.recover_platform_outbox"],
-                ),
-                (
-                    "generator",
-                    args.agent_image,
-                    dict(agent_env, VERIFICATION_ROLE="generator"),
-                    [
-                        "celery",
-                        "-A",
-                        "verify_telegram_ai:celery_app",
-                        "worker",
-                        "--loglevel=warning",
-                        "--concurrency=1",
-                        "--queues=telegram_ai",
-                    ],
-                ),
-                (
-                    "job-scanner",
-                    args.agent_image,
-                    agent_env,
-                    ["python", "-m", "scripts.recover_telegram_jobs"],
-                ),
-                (
-                    "publisher",
-                    args.agent_image,
-                    agent_env,
-                    [
-                        "celery",
-                        "-A",
-                        "app.workers.telegram_reply_worker:celery_app",
-                        "worker",
-                        "--loglevel=warning",
-                        "--concurrency=1",
-                        "--queues=telegram_replies",
-                    ],
-                ),
-                (
-                    "reply-scanner",
-                    args.agent_image,
-                    agent_env,
-                    ["python", "-m", "scripts.recover_telegram_replies"],
-                ),
-                (
-                    "sender",
-                    args.webhook_image,
-                    dict(web_env, TELEGRAM_SEND_VERIFICATION="controlled"),
-                    [
-                        "celery",
-                        "-A",
-                        "scripts.telegram_send_verification:celery_app",
-                        "worker",
-                        "--loglevel=warning",
-                        "--concurrency=1",
-                        "--queues=telegram_send",
-                    ],
-                ),
-                (
-                    "send-scanner",
-                    args.webhook_image,
-                    web_env,
-                    ["python", "-m", "scripts.recover_telegram_answers"],
-                ),
-            )
-            for name, image, env, command in commands:
-                container(name, image, command, env)
-
-            def completed():
-                with psycopg.connect(dbname=databases["web"], **params) as db:
-                    return db.execute(
-                        "SELECT state,message_id FROM telegram_answers"
-                    ).fetchone() == ("succeeded", 717)
-
-            wait_for(completed, 90)
-            assert calls == {"groq": 1, "send": 1}
-            assert (
-                client.post(intake, headers=telegram_headers, json=payload).status_code
-                == 200
-            )
-            changed = {**payload, "message": {**payload["message"], "text": "Changed"}}
-            assert (
-                client.post(intake, headers=telegram_headers, json=changed).status_code
-                == 409
-            )
-            assert client.post(intake, content=b"invalid").status_code == 401
-            with psycopg.connect(dbname=databases["web"], **params) as db:
-                original = db.execute(
-                    "SELECT state,attempts,published_job_id FROM platform_ingress_outbox WHERE ingress_id=%s",
-                    (event_id,),
-                ).fetchone()
-                assert original[0:2] == ("published", 2)
-                assert (
-                    db.execute("SELECT count(*) FROM telegram_answers").fetchone()[0]
-                    == 1
-                )
-            with psycopg.connect(dbname=databases["agent"], **params) as db:
-                assert db.execute(
-                    "SELECT id,state,answer FROM telegram_ai_jobs WHERE event_id=%s",
-                    (event_id,),
-                ).fetchone() == (original[2], "completed", "Synthetic sender answer")
-                assert (
-                    db.execute("SELECT count(*) FROM telegram_ai_usage").fetchone()[0]
-                    == 1
-                )
-                assert (
-                    db.execute("SELECT state FROM telegram_reply_outbox").fetchone()[0]
-                    == "published"
-                )
-                for table in ("conversations", "messages", "llm_usage_records"):
-                    assert (
-                        db.execute(
-                            sql.SQL("SELECT count(*) FROM {}").format(
-                                sql.Identifier(table)
-                            )
-                        ).fetchone()[0]
-                        == 0
-                    )
-            deactivated = client.post(bot_route + "/deactivate", headers=headers)
-            assert deactivated.status_code == 200, (
-                f"Controlled deactivate HTTP {deactivated.status_code}"
-            )
-            assert (
-                client.post(
-                    intake, headers=telegram_headers, json={"update_id": 43}
-                ).status_code
-                == 403
-            )
-            time.sleep(6)
-            assert calls == {"groq": 1, "send": 1}
-            container(
-                "embed-worker",
-                args.agent_image,
-                [
-                    "celery",
-                    "-A",
-                    "app.workers.embed_worker:celery_app",
-                    "worker",
-                    "--loglevel=warning",
-                    "--concurrency=1",
-                    "--queues=celery",
-                ],
-                agent_env,
-            )
-            # Reuse the existing standalone smoke against this isolated stack.
-            # Its provisioning command targets this owned container explicitly.
-            import verify_stack as legacy
-
-            legacy.AUTH, legacy.WEBHOOK, legacy.AGENT = auth, web, agent
-            original_run = subprocess.run
-
-            def isolated_run(command, **kwargs):
-                if command[:5] == [
-                    "docker",
-                    "compose",
-                    "exec",
-                    "-T",
-                    "webhook_service",
-                ]:
-                    command = ["docker", "exec", "-i", web_container, *command[5:]]
-                return original_run(command, **kwargs)
-
-            with patch.object(legacy.subprocess, "run", isolated_run):
-                legacy.main()
-            with psycopg.connect(dbname=databases["agent"], **params) as db:
-                assert (
-                    db.execute("SELECT count(*) FROM telegram_ai_jobs").fetchone()[0]
-                    == 1
-                )
-                assert (
-                    db.execute("SELECT count(*) FROM telegram_ai_usage").fetchone()[0]
-                    == 1
-                )
-            assert calls == {"groq": 1, "send": 1}
-            print(
-                "PASS real issuer JWT -> Telegram intake during broker outage -> replayed real admission -> bounded controlled Groq -> one result/usage -> signed answer -> canonical controlled send; duplicate/conflict/auth/deactivation and legacy isolation"
-            )
-        artifact = root / ".venv" / ("telegram-ai-" + tag + ".json")
-        artifact.parent.mkdir(exist_ok=True)
-        artifact.write_text(
-            json.dumps({"databases": databases, "calls": calls}), encoding="utf-8"
-        )
+        fixture.start()
+        report["callback_origin"] = fixture.callback_origin
+        fixture.stage = "controlled issuer and setup"
+        report["checks"] = verify(fixture)
+        report["proof"] = fixture.proof()
+        report["source_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        report["fixture_source_sha256"] = hashlib.sha256(Path(smoke.__file__).read_bytes()).hexdigest()
+        report["passed"] = True
+    except Exception as error:
+        report.update(passed=False, error_class=type(error).__name__, failed_stage=fixture.stage)
+        if isinstance(error, smoke.VerificationError):
+            report["failure_reason"] = str(error)
+        raise
     finally:
-        for identity in reversed(containers):
-            logs = subprocess.run(
-                ["docker", "logs", identity], capture_output=True, check=False
-            )
-            files.append(logs.stdout + logs.stderr)
-            run(["docker", "stop", "--time", "5", identity])
-            run(["docker", "rm", identity])
-        directory = root / ".venv"
-        directory.mkdir(exist_ok=True)
-        (directory / ("telegram-ai-" + tag + ".log")).write_bytes(b"\n".join(files))
-        receiver.shutdown()
+        try:
+            fixture.stop()
+            report["owned_containers_stopped"] = True
+        except Exception as error:
+            report.update(passed=False, owned_containers_stopped=False, cleanup_error_class=type(error).__name__)
+            raise
+        finally:
+            artifact = fixture.directory / "receipt.json"
+            artifact.write_text(json.dumps(report, indent=2))
+            print("RECEIPT: " + str(artifact), flush=True)
+    # Keep this second acceptance sequential on the fixed-memory host.
+    smoke.main([option for kind in images for option in (f"--{'webhook' if kind == 'web' else kind}-image", images[kind])])
 
 
-if os.getenv("VERIFICATION_ROLE") in {"ingress", "generator"}:
+if os.getenv("VERIFICATION_ROLE") in {"ingress", "generator", "sender"}:
     install_worker_boundary()
     if os.environ["VERIFICATION_ROLE"] == "generator":
         from app.workers import telegram_worker
-
         celery_app = telegram_worker.celery_app
     else:
         from src.infrastructure.queue import celery_app as worker_module
-
         celery_app = worker_module.celery_app
 elif __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:  # noqa: BLE001 - CLI failures must not expose fixture credentials.
+        print("STOP: " + type(error).__name__ + "; details withheld", file=sys.stderr)
+        raise SystemExit(1) from None
