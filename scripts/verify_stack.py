@@ -374,7 +374,7 @@ class Fixture:
         self.compose("config", "--quiet")
         validate_config(json.loads(self.compose("config", "--format", "json")), self.project, self.images, self.controlled_ai, bool(self.scanners))
 
-    def owned(self):
+    def owned(self, *, cleanup=False):
         ids = self.compose("ps", "--all", "--quiet").splitlines()
         if not ids:
             return {}
@@ -387,12 +387,15 @@ class Fixture:
             labels = item["Config"]["Labels"]
             name = labels["com.docker.compose.service"]
             require(labels["com.docker.compose.project"] == self.project and name in self.kinds, "Container ownership mismatch")
+            require(name not in result, "Duplicate fixture service instance")
             require(item["Image"] == self.images[self.kinds[name]], "Container image mismatch")
             require(set(item["NetworkSettings"]["Networks"]) == {self.project + "_default"}, "Container network mismatch")
             require(not item["HostConfig"].get("PortBindings") and not item["HostConfig"].get("PublishAllPorts"), "Unexpected host publication")
             if name in self.scanners:
-                require(item["HostConfig"].get("Init") and item["HostConfig"]["RestartPolicy"] ==
-                        {"Name": "on-failure", "MaximumRetryCount": 2} and
+                policy = item["HostConfig"]["RestartPolicy"]
+                expected = {"Name": "on-failure", "MaximumRetryCount": 2}
+                require(item["HostConfig"].get("Init") and
+                        (policy == expected or cleanup and policy == {"Name": "no", "MaximumRetryCount": 0}) and
                         item["Config"]["Cmd"] == ["python", "-m", self.scanners[name][1]], "Actual scanner entrypoint/policy mismatch")
             environment = dict(value.split("=", 1) for value in item["Config"]["Env"] if "=" in value)
             traffic_settings(name, environment, self.controlled_ai)
@@ -473,9 +476,17 @@ print(json.dumps(request(data['url'],data['method'],payload,data['headers'],allo
         self.addresses = [urlsplit(self.url(name)).hostname for name in self.items]
 
     def stop(self):
-        self.owned()
-        self.compose("stop", "--timeout", "10")
-        require(all(not item["State"]["Running"] for item in self.owned().values()), "Fixture did not stop")
+        items = self.owned(cleanup=True)
+        scanner_ids = [items[name]["Id"] for name in self.scanners if name in items]
+        try:
+            if scanner_ids:
+                self.run(["docker", "update", "--restart=no", *scanner_ids])
+        finally:
+            self.compose("stop", "--timeout", "10")
+        items = self.owned(cleanup=True)
+        require(all(not item["State"]["Running"] for item in items.values()), "Fixture did not stop")
+        require(all(items[name]["HostConfig"]["RestartPolicy"] == {"Name": "no", "MaximumRetryCount": 0}
+                    for name in self.scanners if name in items), "Fixture scanner restart remains enabled")
 
     def proof(self):
         items = self.owned()
@@ -618,6 +629,34 @@ def verify(fixture):
         expect(request(ingress, "POST", payload, quota_headers)[0], 429)
         code = "import asyncio; from src.infrastructure.cache.rate_limiter import RateLimiter; print(asyncio.run(RateLimiter().allow(key='ingest:wh_quota',limit=8)))"
         require(fixture.compose("exec", "-T", "webhook_service", "python", "-c", code) == "False", "Another API process reset quota")
+        fixture.stage = "legacy API restart without Redis"
+        original = fixture.owned()["webhook_service"]
+        fixture.compose("stop", "--timeout", "10", "webhook_service")
+        fixture.compose("start", "webhook_service")
+        current = fixture.owned()["webhook_service"]
+        require(current["Id"] == original["Id"] and current["State"]["StartedAt"] != original["State"]["StartedAt"], "API restart identity mismatch")
+        previous_address = urlsplit(web).hostname
+        fixture.items["webhook_service"] = current
+        web = fixture.url("webhook_service")
+        fixture.addresses = [address for address in fixture.addresses if address != previous_address] + [urlsplit(web).hostname]
+        ingress = web + "/webhooks/ingest/" + source["slug"]
+
+        def api_live():
+            try:
+                return request(web + "/health/live")[0] == 200
+            except RuntimeError:
+                return False
+
+        wait_until(api_live, "API did not recover without Redis", 30)
+        status, readiness = request(web + "/health/ready")
+        expect(status, 503)
+        require(readiness == {"status": "unavailable", "database": "ok", "redis": "unavailable"}, "Incorrect offline API readiness")
+        expect(request(ingress, "POST", payload, quota_headers)[0], 429)
+        status, duplicate = request(ingress, "POST", payload, headers)
+        expect(status, 200)
+        require(duplicate["event_id"] == event["event_id"], "API restart lost original event")
+        expect(request(ingress, "POST", payload, {"X-Webhook-Signature": "sha256=" + "0" * 64})[0], 401)
+        print("PASS: API restart without Redis retains quota/event and live200/ready503/HMAC contracts", flush=True)
         fixture.stage = "legacy scanner broker outage"
         fixture.owned()
         fixture.compose("start", "legacy_scanner")
@@ -656,6 +695,7 @@ def verify(fixture):
         scanner_proof["legacy_scanner"].update(postgres_outage_observed=True, broker_outage_observed=True,
             admission_without_redis=True, offline_hmac_denial=401, offline_api_key_denial=401,
             offline_rate_limit=429, quota_shared_between_processes=True, quota_preserved_after_redis_recovery=True)
+        scanner_proof["legacy_scanner"].update(api_restart_same_container=True, quota_preserved_after_api_restart=True, api_offline_readiness=503)
         time.sleep(6)
         require(len(request(callback + "/receipt")[1]["records"]) == 2, "Scanner restart repeated delivery")
     print("PASS: bad HMAC/unsafe origin rejected; real queued signed numeric-IP delivery; sequential/concurrent duplicates and header exclusion")

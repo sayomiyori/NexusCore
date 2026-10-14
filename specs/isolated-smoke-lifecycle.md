@@ -1,0 +1,26 @@
+# Isolated smoke lifecycle
+
+Docker Desktop startup on 2026-10-14 revived 23 previously stopped synthetic
+scanner containers from retained smoke projects. Their bounded restart policy
+was still configured and their scanner cleanup exit code was 143. Data was not
+deleted; only inspected, receipt-owned test scanners were stopped and changed to
+`restart=no`. The main deployment remains outside fixture mutations.
+
+During verification, scanners retain `init: true` and `on-failure:2`; automatic
+restart checks remain mandatory. Before final cleanup, inspect ownership, image,
+internal network, closed/synthetic credentials and entrypoint. Disable restart
+only for those owned scanner IDs, then stop the project and prove both stopped
+state and `restart=no`. Repeated cleanup accepts already disabled policies;
+active verification still rejects a disabled or unapproved scanner policy.
+Failed fixtures and normal mode must preserve foreign resources and all volumes.
+Duplicate service instances fail closed before any cleanup mutation.
+
+With fixture Redis stopped, restart the same legacy API container. Require a
+different start time, live 200 and ready 503, retained PostgreSQL quota 429,
+unchanged duplicate event ID and HMAC denial. Broker restoration and the real
+scanner must deliver exactly two callbacks without repeats after scanner restart.
+
+Verify Docker-boundary regressions, standalone and controlled-AI scanner modes,
+Ruff/compilation, fresh read-only review and before/after main integrity. Do not
+restart shared Docker/WSL to test cleanup; inspect persisted container policy.
+No real Telegram/LLM, main rollout, global cleanup or new dependency.

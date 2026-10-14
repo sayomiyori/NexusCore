@@ -181,6 +181,67 @@ class StackSmokeTests(unittest.TestCase):
                 fixture.stop()
         self.assertFalse(any("stop" in command for command in calls))
 
+    def test_cleanup_disables_owned_scanner_restart_and_can_repeat(self):
+        fixture = object.__new__(smoke.Fixture)
+        fixture.project, fixture.prefix = PROJECT, ["docker", "compose", "-p", PROJECT]
+        fixture.environment, fixture.controlled_ai = {}, False
+        fixture.images, fixture.scanners = smoke.IMAGES, smoke.LEGACY_SCANNERS
+        fixture.kinds = {"legacy_scanner": "web"}
+        item = {"Id": "owned-scanner", "Image": smoke.IMAGES["web"], "Mounts": [],
+                "Config": {"Cmd": ["python", "-m", "scripts.recover_legacy_deliveries"], "Env": [],
+                           "Labels": {"com.docker.compose.project": PROJECT, "com.docker.compose.service": "legacy_scanner"}},
+                "HostConfig": {"Init": True, "RestartPolicy": {"Name": "on-failure", "MaximumRetryCount": 2}},
+                "NetworkSettings": {"Networks": {PROJECT + "_default": {}}},
+                "State": {"Running": True}}
+        network = {"Internal": True, "Labels": {"com.docker.compose.project": PROJECT},
+                   "IPAM": {"Config": [{"Subnet": smoke.fixture_subnet(PROJECT)}]}}
+        calls = []
+        update_error = False
+        duplicate = False
+
+        def boundary(command, **_):
+            calls.append(command)
+            if command[-3:] == ["ps", "--all", "--quiet"]:
+                output = "owned-scanner"
+            elif command[:3] == ["docker", "network", "inspect"]:
+                output = json.dumps([network])
+            elif command[:2] == ["docker", "inspect"]:
+                output = json.dumps([item, {**item, "Id": "second-owned-scanner"}] if duplicate else [item])
+            elif command[:2] == ["docker", "update"]:
+                self.assertEqual(command, ["docker", "update", "--restart=no", "owned-scanner"])
+                if update_error:
+                    return subprocess.CompletedProcess(command, 1, "synthetic-details-must-not-leak", "")
+                item["HostConfig"]["RestartPolicy"] = {"Name": "no", "MaximumRetryCount": 0}
+                output = "owned-scanner"
+            elif command[-3:] == ["stop", "--timeout", "10"]:
+                if not update_error:
+                    self.assertEqual(item["HostConfig"]["RestartPolicy"]["Name"], "no")
+                item["State"]["Running"] = False
+                output = ""
+            else:
+                self.fail("Unexpected Docker command")
+            return subprocess.CompletedProcess(command, 0, output, "")
+
+        with patch.object(smoke.subprocess, "run", side_effect=boundary):
+            fixture.stop()
+            fixture.stop()
+            self.assertFalse(item["State"]["Running"])
+            self.assertEqual(item["HostConfig"]["RestartPolicy"], {"Name": "no", "MaximumRetryCount": 0})
+            with self.assertRaisesRegex(ValueError, "policy mismatch"):
+                fixture.owned()
+            update_error = True
+            item["HostConfig"]["RestartPolicy"] = {"Name": "on-failure", "MaximumRetryCount": 2}
+            item["State"]["Running"] = True
+            with self.assertRaisesRegex(RuntimeError, "captured output withheld"):
+                fixture.stop()
+            self.assertFalse(item["State"]["Running"])
+            duplicate = True
+            previous_mutations = sum("stop" in command or command[:2] == ["docker", "update"] for command in calls)
+            with self.assertRaisesRegex(ValueError, "Duplicate fixture service instance"):
+                fixture.stop()
+            self.assertEqual(previous_mutations, sum("stop" in command or command[:2] == ["docker", "update"] for command in calls))
+        self.assertEqual(sum(command[:2] == ["docker", "update"] for command in calls), 3)
+
     def test_callback_verifies_signature_and_records_sensitive_header_names_only(self):
         secret = secrets.token_hex(32)
         server = ThreadingHTTPServer(("127.0.0.1", 0), smoke.receiver_handler(secret))

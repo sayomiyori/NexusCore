@@ -76,22 +76,60 @@ it in Compose and Docker inspection. This avoids exhausting Docker's automatic
 address pools while preserving stopped fixture networks/volumes. A conflicting
 existing subnet fails fixture creation; no Docker/WSL setting is changed.
 
-Every exit stops only owned containers and retains volumes for inspection.
+Every exit disables restart for inspected owned scanner IDs before stopping
+owned containers, then checks stopped state and `restart=no`. Cleanup can be
+retried; active checks still require the original bounded restart policy. If
+disabling restart fails, cleanup still attempts to stop its own project and
+reports failure. Volumes are retained for inspection.
+Duplicate instances of one fixture service fail ownership validation before any
+cleanup mutation; no scanner can be silently omitted from policy demotion.
 The credential-free result is `.venv/nexus-smoke-<uuid>/receipt.json`, including
 source hashes, checks, process proof and cleanup status. Captured command/log
 errors are withheld from the CLI to avoid exposing credentials. Local receipts
 and operational integrity snapshots are ignored and are not published.
+
+## Retained fixture cleanup failure on 2026-10-14
+
+Starting an already stopped Docker Desktop revived 23 retained synthetic
+scanner containers even though their receipts recorded successful stop. Their
+`on-failure:2` policy remained configured; scanner SIGTERM cleanup exits 143.
+The inspected test scanners were demoted to `restart=no` and stopped without
+deleting volumes or touching main containers. The lifecycle regression now
+requires policy demotion before stop, rejects disabled policies during active
+verification, and checks repeated cleanup and stop-after-update-error behavior.
+It also rejects duplicate service instances before changing or stopping them.
+
+Shared Docker/WSL is not restarted to test cleanup. Runtime inspection verifies
+the persisted disabled policy. Main rows/schema/sequences/metadata, uploads and
+configuration/WSL hashes matched the retained snapshot after Docker startup;
+the same main container IDs/images were retained. Container fingerprints changed
+across startup, so a separate post-start baseline was saved without replacing
+the previous snapshot and is checked before/after further isolated work.
 
 ## Regression commands
 
 On 2026-10-14, offline legacy admission and recovery passed with the updated
 WebHook image: 202/200 while Redis was stopped, HMAC/API-key denials, shared 429
 quota before/after broker recovery and two callbacks after scanner recovery.
+The same API container is also stopped and restarted while Redis is unavailable.
+Probes re-inspect its IP because Docker may reassign it. Live remains 200, ready
+reports database OK/Redis unavailable with 503, the saved event returns its
+original duplicate ID, HMAC stays enforced and exhausted quota stays 429.
 The separate publishable-source runtime passed with its single new migration
 head and one callback. Its full service suite passed 351 tests (85.86% coverage),
 migration up/down/up/check, Ruff and strict Mypy. Twenty-eight root regressions
 and fresh read-only adversarial/security review passed. Original root integrity
 matched the before-task snapshot; all new test containers were stopped.
+
+The later lifecycle continuation on 2026-10-14 passed the combined scanner
+command on the final source hashes. The controlled AI fixture retained one
+generation/usage/send; the separate legacy fixture retained two callbacks and
+passed API restart with Redis unavailable. All 23 new containers stopped without
+OOM and all five scanner restart policies were `no`. Twenty-nine root tests,
+Ruff, compilation and fresh read-only adversarial/security review passed.
+All nine main container IDs, start times and restart counts remained unchanged
+during these tests; available healthchecks were healthy. Main data, uploads,
+definitions and configuration/WSL hashes matched the post-start baseline.
 
 Local acceptance on 2026-10-13 passed the combined scanner command: four AI loops
 and the separate legacy loop recovered from PostgreSQL/broker faults and five
