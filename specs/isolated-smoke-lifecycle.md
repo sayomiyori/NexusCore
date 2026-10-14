@@ -27,4 +27,8 @@ An explicitly requested manual Docker Desktop restart must compare completed
 scanner IDs/start times/finish times/restart counts, restore existing main
 processes and verify data/configuration/WSL integrity. Record startup failures
 and runtime metadata differences; do not reset Docker, delete data or change WSL.
+IPC fix acceptance requires two consecutive native Desktop restarts with exit 0
+and no external socket/directory cleanup or forced process termination. Verify
+the signed supported Desktop release and compare main/scanner/data fingerprints;
+distinguish Desktop settings schema migration from changing WSL configuration.
 No real Telegram/LLM, main rollout, global cleanup or new dependency.

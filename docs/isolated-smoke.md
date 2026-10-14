@@ -141,6 +141,48 @@ restart failed in this run; successful startup required the preserved-directory
 recovery. Local credential-free before/after receipts
 are retained under `.venv`; no live Telegram/LLM or load acceptance was performed.
 
+## Docker IPC fix and native restart acceptance on 2026-10-14
+
+Docker Desktop 4.63.0 aborted startup when Windows rejected stale host socket
+access/removal with error 1920. Read-only directory enumeration identified
+`engine.sock`, `dockerInference` and `userAnalyticsOtlpHttp.sock` as zero-byte
+AF_UNIX reparse entries (`0x80000023`). These attributes do not establish NTFS
+corruption or a kernel defect. The installed AF_UNIX driver was already running.
+
+The official updater offered 4.95.0 (242831), consistent with the later successful
+normal stop/start report in [Docker issue 554](https://github.com/docker/desktop-feedback/issues/554).
+Before updating, read-only main/scanner/data fingerprints and per-key Redis
+value/absolute-expiry hashes were saved; Desktop settings were backed up with
+Windows DPAPI. `docker desktop update --quiet` installed the signed Docker Inc
+release. Its old CLI process exited 1 during the update, so that exit is not
+reported as successful; the installed signed binary, installer launch record,
+running Desktop and subsequent native restart results establish the applied
+version. Engine/CLI are 29.8.2 and Compose is 5.6.0.
+
+Two consecutive `docker desktop restart --timeout 180` commands then exited 0.
+Each changed the Desktop session and all nine main container start times while
+preserving their IDs/images/configuration/mounts. No manual or external scripted
+IPC cleanup, process kill, Windows reboot or WSL shutdown occurred during these
+restart checks. Six healthchecks became healthy; host `/health` on 28080, 8001,
+8014 and 8080 returned 200, both workers logged readiness without tracebacks and
+the main legacy scanner remained idle. All 35 completed smoke scanners retained
+their IDs/start/finish times/restart counts, stayed stopped and kept `restart=no`.
+
+Main PostgreSQL rows/schema/sequences/metadata, uploads, `.env`/release/WSL hashes
+and all 224 volume names matched the pre-update baseline. Redis db1 retained all
+17 values and absolute expiries. Per-key comparison now proves the broker-only
+difference: one existing Celery binding set value changed in each of db2/db3;
+their three-key inventories, types and expiry semantics were preserved. No keys
+were added/removed and no data restore was performed.
+
+The data disk junction still targets `D:/Docker/wsl/disk`. WSL version and the
+Windows AF_UNIX driver hash are unchanged. Existing explicit Desktop preferences
+matched except the updater's `SettingsVersion` migration; it added install-time
+metadata and `WslEngineEnabled=true`, recording the already used WSL backend.
+No `.wslconfig` or distribution configuration was edited. No real Telegram/LLM
+was enabled. Forced termination, sleep/resume, Windows reboot and load remain
+outside this acceptance. Private backups and receipts are not published.
+
 ## Regression commands
 
 On 2026-10-14, offline legacy admission and recovery passed with the updated
