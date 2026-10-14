@@ -99,12 +99,47 @@ requires policy demotion before stop, rejects disabled policies during active
 verification, and checks repeated cleanup and stop-after-update-error behavior.
 It also rejects duplicate service instances before changing or stopping them.
 
-Shared Docker/WSL is not restarted to test cleanup. Runtime inspection verifies
-the persisted disabled policy. Main rows/schema/sequences/metadata, uploads and
+Initial cleanup acceptance did not restart shared Docker/WSL. Runtime inspection
+verified the persisted disabled policy. Main rows/schema/sequences/metadata, uploads and
 configuration/WSL hashes matched the retained snapshot after Docker startup;
 the same main container IDs/images were retained. Container fingerprints changed
 across startup, so a separate post-start baseline was saved without replacing
 the previous snapshot and is checked before/after further isolated work.
+
+## Explicit Docker Desktop restart on 2026-10-14
+
+At the user's explicit request, the retained completed scanner inventory was
+checked around an actual Desktop/engine restart. All 35 scanners remained stopped
+with `restart=no`; their container IDs, last start/finish times and restart counts
+were unchanged in repeated post-start inspections. This includes stopped
+containers from failed smoke runs and the separate publishable-source fixtures.
+
+`docker desktop restart --timeout 180` failed during startup: the backend could
+not remove the inaccessible `docker-secrets-engine/engine.sock` IPC object.
+The two runtime directories containing only zero-byte reparse-point sockets
+(`docker-secrets-engine` and `Docker/run`) were renamed
+to adjacent preserved backups; Docker Desktop was relaunched normally. Its
+session changed and all nine existing main containers restarted with the same
+IDs/images/configuration/mounts. Six configured healthchecks became healthy,
+both Celery workers logged fresh readiness without tracebacks and the main legacy
+scanner remained idle. No factory reset, WSL shutdown/configuration change,
+manual migration, data restore or volume deletion was performed.
+
+PostgreSQL rows/schema/sequences/metadata, uploads and root configuration/WSL
+hashes matched the pre-restart snapshot. All 224 volume names were retained.
+Redis db1 retained its 17 logical values and absolute expiry times. Strict
+whole-Redis equality failed for db2/db3: each still contains three Celery binding
+sets, but its aggregate hash differs. The pre-start digest does not identify
+individual changed members. Kombu's installed queue binding and generated pidbox
+reply queue code is consistent with worker startup changing this metadata; this
+is an inference, not proof of an exact member-level diff. No Redis restore was
+attempted. Docker also reassigned runtime network endpoint IDs/MACs/IPs and the
+default bridge network ID; static container configuration and mounts matched.
+
+The scanner policy is verified across this real restart. Native unattended Docker
+restart failed in this run; successful startup required the preserved-directory
+recovery. Local credential-free before/after receipts
+are retained under `.venv`; no live Telegram/LLM or load acceptance was performed.
 
 ## Regression commands
 

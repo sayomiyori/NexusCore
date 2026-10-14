@@ -21,6 +21,10 @@ unchanged duplicate event ID and HMAC denial. Broker restoration and the real
 scanner must deliver exactly two callbacks without repeats after scanner restart.
 
 Verify Docker-boundary regressions, standalone and controlled-AI scanner modes,
-Ruff/compilation, fresh read-only review and before/after main integrity. Do not
-restart shared Docker/WSL to test cleanup; inspect persisted container policy.
+Ruff/compilation, fresh read-only review and before/after main integrity.
+Automated smoke must not restart shared Docker/WSL; inspect persisted policy.
+An explicitly requested manual Docker Desktop restart must compare completed
+scanner IDs/start times/finish times/restart counts, restore existing main
+processes and verify data/configuration/WSL integrity. Record startup failures
+and runtime metadata differences; do not reset Docker, delete data or change WSL.
 No real Telegram/LLM, main rollout, global cleanup or new dependency.
