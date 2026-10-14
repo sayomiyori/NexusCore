@@ -205,7 +205,7 @@ def ai_config(images, scanners=False):
              "AGENT_WEBHOOK_REPLY_KEY": "${AI_REPLY_KEY}", "GROQ_API_KEY": "synthetic-groq-verification",
              "CONTROLLED_PROVIDER_URL": "${SMOKE_CALLBACK_ORIGIN}"}
     services["webhook_service"]["environment"] = web
-    services["webhook_service"]["command"] = ["sh", "-c", "python -m alembic upgrade head && exec uvicorn verify_telegram_ai:create_webhook_app --factory --host 0.0.0.0 --port 8000 --no-access-log"]
+    services["webhook_service"]["command"] = ["sh", "-c", "python -m alembic upgrade heads && exec uvicorn verify_telegram_ai:create_webhook_app --factory --host 0.0.0.0 --port 8000 --no-access-log"]
     services["agent_service"]["environment"] = agent
     services["callback"]["environment"].update(DATABASE_URL=web["DATABASE_URL"], VERIFICATION_ROLE="receiver")
     services["callback"]["command"] = ["python", "/verification/verify_telegram_ai.py", "--receiver"]

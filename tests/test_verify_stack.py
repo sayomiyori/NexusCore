@@ -144,10 +144,18 @@ class StackSmokeTests(unittest.TestCase):
             self.assertNotEqual(fixture.project, "nexuscore")
             self.assertEqual((fixture.directory / "empty.env").read_text(), "")
             text = (fixture.directory / "compose.json").read_text()
+            self.assertEqual(json.loads(text)["networks"]["default"]["ipam"],
+                             {"config": [{"subnet": smoke.fixture_subnet(fixture.project)}]})
             for name in ("SMOKE_DB_PASSWORD", "SMOKE_WEB_SECRET", "SMOKE_AUTH_SECRET", "SMOKE_SIGNING_SECRET"):
                 self.assertNotIn(fixture.environment[name], text)
             self.assertNotIn("docker-compose.yml", command)
             self.assertIn(str(fixture.directory / "empty.env"), command)
+
+    def test_fixture_subnet_rejects_unowned_range(self):
+        config = resolved_config()
+        config["networks"]["default"]["ipam"] = {"config": [{"subnet": "172.25.0.0/16"}]}
+        with self.assertRaisesRegex(ValueError, "Unexpected fixture subnet"):
+            smoke.validate_config(config, PROJECT, smoke.IMAGES)
 
     def test_cleanup_refuses_foreign_container_labels(self):
         calls = []
@@ -160,7 +168,8 @@ class StackSmokeTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, "foreign-id", "")
             elif command[:3] == ["docker", "network", "inspect"]:
                 project = command[-1].removesuffix("_default")
-                value = [{"Internal": True, "Labels": {"com.docker.compose.project": project}}]
+                value = [{"Internal": True, "Labels": {"com.docker.compose.project": project},
+                          "IPAM": {"Config": [{"Subnet": smoke.fixture_subnet(project)}]}}]
             else:
                 value = [{"Config": {"Labels": {"com.docker.compose.service": "auth_service", "com.docker.compose.project": "nexuscore"}}}]
             return subprocess.CompletedProcess(command, 0, json.dumps(value), "")

@@ -54,7 +54,10 @@ owned synthetic queue messages and starts consumer+scanner. Durable rows must
 then advance through the actual recovery loop. Exactly one generation, usage,
 result and canonical send must remain. Ingress deliberately loses its first
 successful admission receipt; replay publishes the same job on attempt two.
-Legacy delivery must recover after broker outage and retain two signed callbacks.
+Legacy delivery admits and deduplicates while Redis is stopped, then recovers
+exactly two signed callbacks. Invalid HMAC/API-key access stays 401; exhausting
+the configured fixture quota returns 429 without Redis. A second API process
+shares that quota and restoring Redis keeps the 429.
 
 Each scanner uses `init: true` and bounded `on-failure:2`. The harness kills only
 its inspected `python -m <scanner>` child and requires an automatic restart of
@@ -63,6 +66,16 @@ cycles must not repeat provider/send/delivery effects. Application UID10001,
 expected migration heads, running/no-OOM state and owned cleanup are checked.
 Normal mode keeps its original closed settings and does not start scanners.
 
+The current isolated WebHook image adds PostgreSQL legacy quotas. Its two local
+migration heads (`8f3b1c6d2a90`, `c42d8e91a730`) are both checked; the separately
+publishable WebHook source has the single new `c42d8e91a730` head. Fixture startup
+uses `alembic upgrade heads`; no main deployment migration is performed.
+
+Each new fixture assigns a UUID-derived private `10.x.y.0/24` subnet and verifies
+it in Compose and Docker inspection. This avoids exhausting Docker's automatic
+address pools while preserving stopped fixture networks/volumes. A conflicting
+existing subnet fails fixture creation; no Docker/WSL setting is changed.
+
 Every exit stops only owned containers and retains volumes for inspection.
 The credential-free result is `.venv/nexus-smoke-<uuid>/receipt.json`, including
 source hashes, checks, process proof and cleanup status. Captured command/log
@@ -70,6 +83,15 @@ errors are withheld from the CLI to avoid exposing credentials. Local receipts
 and operational integrity snapshots are ignored and are not published.
 
 ## Regression commands
+
+On 2026-10-14, offline legacy admission and recovery passed with the updated
+WebHook image: 202/200 while Redis was stopped, HMAC/API-key denials, shared 429
+quota before/after broker recovery and two callbacks after scanner recovery.
+The separate publishable-source runtime passed with its single new migration
+head and one callback. Its full service suite passed 351 tests (85.86% coverage),
+migration up/down/up/check, Ruff and strict Mypy. Twenty-eight root regressions
+and fresh read-only adversarial/security review passed. Original root integrity
+matched the before-task snapshot; all new test containers were stopped.
 
 Local acceptance on 2026-10-13 passed the combined scanner command: four AI loops
 and the separate legacy loop recovered from PostgreSQL/broker faults and five

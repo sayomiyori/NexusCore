@@ -29,7 +29,7 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[1]
 IMAGES = {
     "auth": "sha256:65256cebecb84ac274ad7726bcc12286ea8464f22651a2748f37f07dd45c5a6a",
-    "web": "sha256:031adb2cb0b7ce07d5de0fe777fde63a47ced36389327a21f0d1c73be12d9888",
+    "web": "sha256:7cae10258f593cf22149130b306181ce26fa910542b96dc60582be9c333634d4",
     "agent": "sha256:2daa64d236fe947f52498260a852ea402a4f2fd74ffbc9d033da67a1c80c8b03",
     "postgres": "pgvector/pgvector:pg16",
     "redis": "redis:7-alpine",
@@ -226,6 +226,8 @@ def smoke_config(images, scanners=False):
     web = {**closed, "DATABASE_URL": database("asyncpg", "webhook"),
            "REDIS_URL": "redis://redis:6379/1", "CELERY_BROKER_URL": "redis://redis:6379/1",
            "SECRET_KEY": "${SMOKE_WEB_SECRET}", "DELIVERY_TRUSTED_ORIGINS": "${SMOKE_CALLBACK_ORIGINS}"}
+    if scanners:
+        web["RATE_LIMIT_INGEST"] = "8"
     agent = {**closed, "DATABASE_URL": database("psycopg", "agent"),
              "REDIS_URL": "redis://redis:6379/2", "CELERY_BROKER_URL": "redis://redis:6379/2",
              "LLM_PROVIDER": "gemini", "LLM_FALLBACK_PROVIDER": ""}
@@ -249,7 +251,7 @@ def smoke_config(images, scanners=False):
             "command": ["sh", "-c", "python -m alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]},
         "webhook_service": {**common, "image": images["web"], "environment": web,
             "healthcheck": {**health, "test": ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready',timeout=2)"]},
-            "command": ["sh", "-c", "python -m alembic upgrade head && exec uvicorn src.api.main:app --host 0.0.0.0 --port 8000"]},
+            "command": ["sh", "-c", "python -m alembic upgrade heads && exec uvicorn src.api.main:app --host 0.0.0.0 --port 8000"]},
         "webhook_worker": {**common, "image": images["web"], "environment": web,
             "command": ["celery", "-A", "src.infrastructure.queue.celery_app", "worker", "--loglevel=warning", "--concurrency=1"]},
         "agent_service": {**common, "image": images["agent"], "environment": {**agent, "PYTHONPATH": "/verification:/app"},
@@ -290,6 +292,10 @@ def traffic_settings(name, environment, controlled_ai=False):
                     environment.get("TELEGRAM_WEBHOOK_ORIGIN") == "https://demo.example.com", "Unexpected controlled service origins")
 
 
+def fixture_subnet(project):
+    return f"10.{int(project[-4:-2], 16)}.{int(project[-2:], 16)}.0/24"
+
+
 def validate_config(config, project, images, controlled_ai=False, scanners=False):
     scanner_roles = (AI_SCANNERS if controlled_ai else LEGACY_SCANNERS) if scanners else {}
     kinds = {**(AI_KINDS if controlled_ai else KINDS), **{name: role[0] for name, role in scanner_roles.items()}}
@@ -298,6 +304,8 @@ def validate_config(config, project, images, controlled_ai=False, scanners=False
     require(set(config["networks"]) == {"default"} and config["networks"]["default"]["internal"], "Fixture network must be internal")
     require(not config["networks"]["default"].get("external") and not config["networks"]["default"].get("driver_opts"), "External network options rejected")
     require(config["networks"]["default"]["name"] == project + "_default", "Unexpected fixture network name")
+    if config["networks"]["default"].get("ipam"):
+        require(config["networks"]["default"]["ipam"] == {"config": [{"subnet": fixture_subnet(project)}]}, "Unexpected fixture subnet")
     require(set(config["volumes"]) == {"uploads", "postgres_data", "redis_data"} and all(
         volume["name"] == project + "_" + key for key, volume in config["volumes"].items()), "Unexpected fixture volume")
     require(all(not volume.get("external") and not volume.get("driver_opts") and
@@ -346,6 +354,7 @@ class Fixture:
         self.images = {kind: json.loads(self.run(["docker", "image", "inspect", image]))[0]["Id"]
                        for kind, image in images.items()}
         config = config_factory(self.images, scanners=True) if scanners else config_factory(self.images)
+        config["networks"]["default"]["ipam"] = {"config": [{"subnet": fixture_subnet(self.project)}]}
         (self.directory / "compose.json").write_text(json.dumps(config))
         (self.directory / "empty.env").write_text("")
         self.prefix = ["docker", "compose", "--project-name", self.project, "--project-directory", str(self.directory),
@@ -372,6 +381,7 @@ class Fixture:
         items = json.loads(self.run(["docker", "inspect", *ids]))
         network = json.loads(self.run(["docker", "network", "inspect", self.project + "_default"]))[0]
         require(network["Internal"] and network["Labels"]["com.docker.compose.project"] == self.project, "Network ownership mismatch")
+        require([item["Subnet"] for item in network["IPAM"]["Config"]] == [fixture_subnet(self.project)], "Actual fixture subnet mismatch")
         result = {}
         for item in items:
             labels = item["Config"]["Labels"]
@@ -475,10 +485,10 @@ print(json.dumps(request(data['url'],data['method'],payload,data['headers'],allo
             uid = self.compose("exec", "-T", name, "python", "-c", "import os; print(os.getuid())")
             require(uid == "10001", "Application fixture UID mismatch")
         versions = {}
-        for database, expected in (("auth_test", "004_tenants"), ("webhook_test", "8f3b1c6d2a90"), ("agent_test", "003_tenant_resources")):
+        for database, expected in (("auth_test", {"004_tenants"}), ("webhook_test", {"8f3b1c6d2a90", "c42d8e91a730"}), ("agent_test", {"003_tenant_resources"})):
             version = self.compose("exec", "-T", "postgres", "psql", "-U", "smoke", "-d", database, "-At", "-c", "SELECT version_num FROM alembic_version")
-            require(version == expected, "Fixture migration head mismatch")
-            versions[database] = version
+            require(set(version.splitlines()) == expected, "Fixture migration head mismatch")
+            versions[database] = sorted(version.splitlines())
         if self.controlled_ai:
             return {"revisions": versions, "application_uid": 10001, "processes_running_without_oom": len(items),
                     **({"all_ten_processes_running_without_oom": True} if not self.scanners else {}),
@@ -584,25 +594,14 @@ def verify(fixture):
     if fixture.scanners:
         fixture.stage = "legacy scanner PostgreSQL outage"
         scanner_database_outage(fixture)
-        fixture.stage = "legacy pending admission"
+        fixture.stage = "legacy admission without Redis"
         fixture.owned()
-        # Admit with healthy Redis; keep the scanner and consumer stopped until the fault.
         fixture.compose("stop", "--timeout", "10", "legacy_scanner", "webhook_worker")
+        fixture.compose("stop", "--timeout", "10", "redis")
+        expect(request(ingress, "POST", payload, {"X-Webhook-Signature": "sha256=" + "0" * 64})[0], 401)
+        expect(request(web + "/api/v1/endpoints", headers={"X-API-Key": "synthetic-invalid"})[0], 401)
     status, event = request(ingress, "POST", payload, headers)
     expect(status, 202)
-    if fixture.scanners:
-        fixture.stage = "legacy scanner broker outage"
-        fixture.owned()
-        fixture.compose("stop", "--timeout", "10", "redis")
-        fixture.compose("start", "legacy_scanner")
-        before = fixture.owned()["legacy_scanner"]
-        wait_until(lambda: "delivery_broker_unavailable" in fixture.compose("logs", "--no-color", "--tail", "100", "legacy_scanner"),
-                   "Legacy scanner did not observe broker outage", 60)
-        current = fixture.owned()["legacy_scanner"]
-        require(current["State"]["Running"] and current["State"]["StartedAt"] == before["State"]["StartedAt"], "Legacy scanner exited on broker outage")
-        fixture.compose("start", "redis")
-        wait_until(lambda: fixture.owned()["redis"]["State"].get("Health", {}).get("Status") == "healthy", "Fixture broker recovery failed")
-        fixture.compose("start", "webhook_worker")
     status, duplicate = request(ingress, "POST", payload, headers)
     expect(status, 200)
     require(duplicate["event_id"] == event["event_id"], "Duplicate produced new event")
@@ -611,6 +610,26 @@ def verify(fixture):
         admissions = list(clients.map(lambda _: request(ingress, "POST", payload, concurrent_headers), range(4)))
     require(sorted(status for status, _ in admissions) == [200, 200, 200, 202], "Concurrent admission duplicated")
     require(len({item["event_id"] for _, item in admissions}) == 1, "Concurrent event IDs differ")
+    if fixture.scanners:
+        fixture.stage = "legacy rate quota without Redis"
+        quota_headers = {**headers, "X-API-Key": "wh_quota-synthetic"}
+        for _ in range(8):
+            expect(request(ingress, "POST", payload, quota_headers)[0], 200)
+        expect(request(ingress, "POST", payload, quota_headers)[0], 429)
+        code = "import asyncio; from src.infrastructure.cache.rate_limiter import RateLimiter; print(asyncio.run(RateLimiter().allow(key='ingest:wh_quota',limit=8)))"
+        require(fixture.compose("exec", "-T", "webhook_service", "python", "-c", code) == "False", "Another API process reset quota")
+        fixture.stage = "legacy scanner broker outage"
+        fixture.owned()
+        fixture.compose("start", "legacy_scanner")
+        before = fixture.owned()["legacy_scanner"]
+        wait_until(lambda: "delivery_broker_unavailable" in fixture.compose("logs", "--no-color", "--tail", "100", "legacy_scanner"),
+                   "Legacy scanner did not observe broker outage", 60)
+        current = fixture.owned()["legacy_scanner"]
+        require(current["State"]["Running"] and current["State"]["StartedAt"] == before["State"]["StartedAt"], "Legacy scanner exited on broker outage")
+        fixture.compose("start", "redis")
+        wait_until(lambda: fixture.owned()["redis"]["State"].get("Health", {}).get("Status") == "healthy", "Fixture broker recovery failed")
+        expect(request(ingress, "POST", payload, quota_headers)[0], 429)
+        fixture.compose("start", "webhook_worker")
     events = [event["event_id"], admissions[0][1]["event_id"]]
     for event_id in events:
         query = urlencode({"owner_id": user["user_id"], "event_id": event_id})
@@ -634,7 +653,9 @@ def verify(fixture):
     if fixture.scanners:
         fixture.stage = "legacy scanner automatic restart"
         scanner_proof = restart_scanners(fixture)
-        scanner_proof["legacy_scanner"].update(postgres_outage_observed=True, broker_outage_observed=True)
+        scanner_proof["legacy_scanner"].update(postgres_outage_observed=True, broker_outage_observed=True,
+            admission_without_redis=True, offline_hmac_denial=401, offline_api_key_denial=401,
+            offline_rate_limit=429, quota_shared_between_processes=True, quota_preserved_after_redis_recovery=True)
         time.sleep(6)
         require(len(request(callback + "/receipt")[1]["records"]) == 2, "Scanner restart repeated delivery")
     print("PASS: bad HMAC/unsafe origin rejected; real queued signed numeric-IP delivery; sequential/concurrent duplicates and header exclusion")
