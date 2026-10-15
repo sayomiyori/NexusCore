@@ -1,8 +1,9 @@
 # Local load probe reporting
 
-The existing bounded loopback GET probe needs a latency acceptance check for
-repeatable local verification. Its URL allowlist, duration/concurrency bounds,
-proxy/redirect restrictions and default JSON report remain unchanged.
+The existing bounded loopback GET probe needs a latency acceptance check and
+saved reports for repeatable local verification. Its URL allowlist,
+duration/concurrency bounds, proxy/redirect restrictions and default JSON report
+remain unchanged.
 
 ## Latency gate
 
@@ -20,9 +21,38 @@ behavior. `verify()` keeps its existing signature and return value.
 Use an explicitly isolated local listener. Auth probes can append audit records;
 do not point them at the main deployment during feature verification.
 
+## JSON report export
+
+`--output PATH` writes the same JSON report as stdout to a new UTF-8 file, with
+a trailing newline. The parent directory must exist. Existing files/directories
+and missing parents are rejected before the probe, with exit code 2. Exclusive
+creation also prevents overwriting a file created during the probe. Write errors
+exit with code 2; a probe failure does not create a report. A failed latency gate
+still saves its report before returning code 1. No URL, body, headers or credentials
+are added to the report. Omitting the flag writes no file.
+
+```powershell
+../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_local_load.py http://127.0.0.1:55921/health --duration 5 --concurrency 1 --max-p95-ms 500 --output .venv/local-load-report.json
+```
+
+Choose a new output filename for every run; directories are not created implicitly.
+A write failure can leave an incomplete new file; exit code 2 marks that failure.
+
 ## Acceptance
 
 - Cover below/equal/above threshold and zero, negative, NaN and infinite limits.
 - Preserve all existing safety and default-report regression tests.
 - Exercise actual CLI success/failure against a disposable loopback HTTP server.
+- Compare saved reports to stdout for passing and failing latency gates.
+- Reject occupied/unavailable output paths and preserve concurrently created files.
+- Confirm probe/write failures and default invocation do not produce misleading success.
 - No new dependency, Docker/WSL change, main data mutation or provider call.
+
+## Verification commands
+
+```powershell
+../WebHook_Manager/.venv/Scripts/python.exe -m unittest discover -s tests -p 'test_verify_local_load.py' -v
+../WebHook_Manager/.venv/Scripts/python.exe -m unittest discover -s tests -p 'test_verify*.py' -q
+../WebHook_Manager/.venv/Scripts/python.exe -m ruff check scripts/verify_local_load.py tests/test_verify_local_load.py
+../WebHook_Manager/.venv/Scripts/python.exe -m py_compile scripts/verify_local_load.py tests/test_verify_local_load.py
+```

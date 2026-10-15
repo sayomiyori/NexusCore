@@ -7,6 +7,7 @@ import math
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
@@ -56,10 +57,19 @@ def main(argv=None) -> int:
     parser.add_argument("--duration", type=int, default=30)
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--max-p95-ms", type=float, help="Fail if reported p95 latency exceeds this limit")
+    parser.add_argument("--output", type=Path, help="Save JSON to a new file in an existing directory")
     args = parser.parse_args(argv)
     if args.max_p95_ms is not None and (not math.isfinite(args.max_p95_ms) or args.max_p95_ms <= 0):
         parser.error("--max-p95-ms must be positive and finite")
+    if args.output is not None and (args.output.exists() or not args.output.parent.is_dir()):
+        parser.error("--output requires a new file in an existing directory")
     report = verify(args.url, args.expected, args.duration, args.concurrency)
+    if args.output is not None:
+        try:
+            with args.output.open("x", encoding="utf-8") as output:
+                output.write(json.dumps(report) + "\n")
+        except OSError:
+            parser.error("Cannot create or write --output report")
     if args.max_p95_ms is not None and report["p95_ms"] > args.max_p95_ms:
         print("Reported p95 latency exceeds --max-p95-ms", file=sys.stderr)
         return 1

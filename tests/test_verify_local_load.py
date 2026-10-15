@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -101,12 +102,64 @@ class LocalLoadTests(unittest.TestCase):
 
     def test_cli_without_latency_limit_preserves_defaults(self):
         with patch("scripts.verify_local_load.verify", return_value={"p95_ms": 99999}) as probe, \
+                patch("scripts.verify_local_load.Path.open") as writer, \
                 contextlib.redirect_stderr(io.StringIO()) as errors:
             self.assertEqual(main(["http://127.0.0.1/health"]), 0)
         probe.assert_called_once_with("http://127.0.0.1/health", 200, 30, 8)
+        writer.assert_not_called()
         self.assertEqual(errors.getvalue(), "")
 
-    def test_cli_latency_gate_against_isolated_http_server(self):
+    def test_existing_output_or_missing_parent_fails_before_probe(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("scripts.verify_local_load.verify") as probe:
+            existing = Path(directory) / "report.json"
+            existing.write_text("preserved", encoding="utf-8")
+            for destination in (existing, Path(directory), Path(directory) / "missing" / "report.json"):
+                with self.subTest(destination=destination), \
+                        contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+                    main(["http://127.0.0.1/health", "--output", str(destination)])
+                self.assertEqual(error.exception.code, 2)
+            probe.assert_not_called()
+            self.assertEqual(existing.read_text(encoding="utf-8"), "preserved")
+
+    def test_output_created_during_probe_is_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "report.json"
+
+            def probe(*args):
+                destination.write_text("concurrent report", encoding="utf-8")
+                return {"p95_ms": 1}
+
+            with patch("scripts.verify_local_load.verify", side_effect=probe), \
+                    contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+                main(["http://127.0.0.1/health", "--output", str(destination)])
+            self.assertEqual(error.exception.code, 2)
+            self.assertEqual(destination.read_text(encoding="utf-8"), "concurrent report")
+
+    def test_probe_failure_does_not_create_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "report.json"
+            with patch("scripts.verify_local_load.verify", side_effect=ValueError("Probe failed")), \
+                    self.assertRaisesRegex(ValueError, "Probe failed"):
+                main(["http://127.0.0.1/health", "--output", str(destination)])
+            self.assertFalse(destination.exists())
+
+    def test_output_open_or_write_failure_is_reported_as_error(self):
+        for operation in ("open", "write"):
+            with self.subTest(operation=operation), tempfile.TemporaryDirectory() as directory, \
+                    patch("scripts.verify_local_load.verify", return_value={"p95_ms": 1}), \
+                    patch("scripts.verify_local_load.Path.open") as writer, \
+                    contextlib.redirect_stderr(io.StringIO()) as errors:
+                if operation == "open":
+                    writer.side_effect = PermissionError
+                else:
+                    writer.return_value.__enter__.return_value.write.side_effect = OSError
+                with self.assertRaises(SystemExit) as error:
+                    main(["http://127.0.0.1/health", "--output", str(Path(directory) / "report.json")])
+            self.assertEqual(error.exception.code, 2)
+            self.assertIn("Cannot create or write --output report", errors.getvalue())
+
+    def test_cli_gate_and_export_against_isolated_http_server(self):
         paths = []
 
         class Handler(BaseHTTPRequestHandler):
@@ -125,20 +178,23 @@ class LocalLoadTests(unittest.TestCase):
                 pass
 
         script = Path(__file__).resolve().parents[1] / "scripts/verify_local_load.py"
-        with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server, \
+                tempfile.TemporaryDirectory() as directory:
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
                 url = f"http://127.0.0.1:{server.server_port}/health"
                 for limit, exit_code in (("5000", 0), ("0.001", 1)):
                     with self.subTest(limit=limit):
+                        destination = Path(directory) / f"report-{exit_code}.json"
                         result = subprocess.run(
                             [sys.executable, str(script), url, "--duration", "5", "--concurrency", "1",
-                             "--max-p95-ms", limit],
+                             "--max-p95-ms", limit, "--output", str(destination)],
                             capture_output=True, text=True, timeout=20, check=False,
                         )
                         self.assertEqual(result.returncode, exit_code, result.stderr)
                         report = json.loads(result.stdout)
+                        self.assertEqual(destination.read_text(encoding="utf-8"), result.stdout)
                         self.assertGreater(report["requests"], 0)
                         self.assertEqual(report["p95_ms"] > float(limit), bool(exit_code))
                         self.assertNotIn(url, result.stdout)
