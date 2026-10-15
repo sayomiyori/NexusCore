@@ -3,6 +3,7 @@
 import argparse
 import ipaddress
 import json
+import math
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -48,11 +49,22 @@ def verify(url: str, expected: int, duration: int, concurrency: int) -> dict:
     return report
 
 
-if __name__ == "__main__":
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("url")
     parser.add_argument("--expected", type=int, choices=(200, 401), default=200)
     parser.add_argument("--duration", type=int, default=30)
     parser.add_argument("--concurrency", type=int, default=8)
-    args = parser.parse_args()
-    verify(args.url, args.expected, args.duration, args.concurrency)
+    parser.add_argument("--max-p95-ms", type=float, help="Fail if reported p95 latency exceeds this limit")
+    args = parser.parse_args(argv)
+    if args.max_p95_ms is not None and (not math.isfinite(args.max_p95_ms) or args.max_p95_ms <= 0):
+        parser.error("--max-p95-ms must be positive and finite")
+    report = verify(args.url, args.expected, args.duration, args.concurrency)
+    if args.max_p95_ms is not None and report["p95_ms"] > args.max_p95_ms:
+        print("Reported p95 latency exceeds --max-p95-ms", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
