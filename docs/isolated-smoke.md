@@ -1,5 +1,9 @@
 # Isolated local smoke and scanner acceptance
 
+For root tooling regressions without Docker or sibling repositories, use
+[the standalone checks guide](local-checks.md). The GitHub Actions workflow
+runs those checks on Windows and Ubuntu; service/scanner acceptance remains below.
+
 Use the existing WebHook Manager virtualenv and locally cached service images:
 
 ```powershell
