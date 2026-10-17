@@ -15,6 +15,12 @@ stderr message; stdout still contains the normal JSON report. An invalid limit
 exits with code 2 before any HTTP request. Omitting the flag preserves existing
 behavior. `verify()` keeps its existing signature and return value.
 
+URL parsing, the loopback/path allowlist, ports 1..65535, expected statuses
+200/401 and integer duration/concurrency bounds are checked before HTTP.
+Whitespace/control characters are rejected before URL normalization.
+Invalid probe inputs exit with code 2 and a static explanation, without echoing
+the URL or a traceback. Optimized Python remains rejected before HTTP.
+
 ```powershell
 ../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_local_load.py http://127.0.0.1:55921/health --duration 5 --concurrency 1 --max-p95-ms 500
 ```

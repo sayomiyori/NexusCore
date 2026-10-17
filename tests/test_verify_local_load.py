@@ -35,9 +35,39 @@ class LocalLoadTests(unittest.TestCase):
 
     def test_invalid_bounds_are_rejected_before_http(self):
         with patch("scripts.verify_local_load.httpx.Client") as client:
-            for duration, concurrency in ((4, 1), (61, 1), (5, 0), (5, 17)):
-                with self.subTest(duration=duration, concurrency=concurrency), self.assertRaises(AssertionError):
+            for duration, concurrency in ((4, 1), (61, 1), (5, 0), (5, 17), (5.5, 1), (5, 1.5), (5, True)):
+                with self.subTest(duration=duration, concurrency=concurrency), self.assertRaises(ValueError):
                     verify("http://127.0.0.1/health", 200, duration, concurrency)
+            client.assert_not_called()
+
+    def test_invalid_probe_inputs_are_usage_errors_without_input_disclosure(self):
+        cases = (
+            ["http://synthetic-private-host.example/health"],
+            ["http://127.0.0.1:0/health"], ["http://127.0.0.1:65536/health"],
+            ["http://127.0.0.1:synthetic-private-port/health"], ["http://[invalid/health"],
+            ["http://127.0.0.1/\thealth"], ["\x00http://127.0.0.1/health"],
+            ["\x01http://127.0.0.1/health"], ["http://127.0.0.1/health\n"],
+            [" http://127.0.0.1/health"], ["http://127.0.0.1/health\x7f"],
+            ["http://synthetic-private-user@127.0.0.1/health"],
+            ["http://127.0.0.1/health?synthetic-private-key=value"],
+            ["http://127.0.0.1/health", "--duration", "4"],
+            ["http://127.0.0.1/health", "--concurrency", "17"],
+        )
+        with patch("scripts.verify_local_load.httpx.Client") as client:
+            for arguments in cases:
+                with self.subTest(arguments=arguments):
+                    with contextlib.redirect_stderr(io.StringIO()) as errors, self.assertRaises(SystemExit) as error:
+                        main(arguments)
+                    self.assertEqual(error.exception.code, 2)
+                    self.assertNotIn("synthetic-private", errors.getvalue())
+                    self.assertNotIn("Traceback", errors.getvalue())
+            client.assert_not_called()
+
+    def test_direct_probe_rejects_unsupported_status_before_http(self):
+        with patch("scripts.verify_local_load.httpx.Client") as client:
+            for status in (0, 201, 302, True):
+                with self.subTest(status=status), self.assertRaisesRegex(ValueError, "Expected status"):
+                    verify("http://127.0.0.1/health", status, 5, 1)
             client.assert_not_called()
 
     def test_optimization_cannot_disable_url_guard(self):
@@ -154,8 +184,9 @@ class LocalLoadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "report.json"
             with patch("scripts.verify_local_load.verify", side_effect=ValueError("Probe failed")), \
-                    self.assertRaisesRegex(ValueError, "Probe failed"):
+                    contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
                 main(["http://127.0.0.1/health", "--output", str(destination)])
+            self.assertEqual(error.exception.code, 2)
             self.assertFalse(destination.exists())
 
     def test_output_open_or_write_failure_is_reported_as_error(self):

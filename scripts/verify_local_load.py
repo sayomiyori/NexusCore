@@ -16,12 +16,23 @@ import httpx
 def verify(url: str, expected: int, duration: int, concurrency: int) -> dict:
     if sys.flags.optimize:
         raise ValueError('Optimized Python disables safety assertions')
-    parsed = urlsplit(url)
-    assert parsed.scheme == "http" and parsed.hostname
-    assert parsed.hostname == "localhost" or ipaddress.ip_address(parsed.hostname).is_loopback
-    assert not parsed.username and not parsed.password and not parsed.query and not parsed.fragment
-    assert parsed.path in ("/health", "/health/ready", "/api/v1/auth/me")
-    assert 5 <= duration <= 60 and 1 <= concurrency <= 16
+    if any(not character.isprintable() or character.isspace() for character in url):
+        raise ValueError("URL must not contain whitespace or control characters")
+    try:
+        parsed = urlsplit(url)
+        safe_url = (parsed.scheme == "http" and parsed.hostname and
+                    (parsed.hostname == "localhost" or ipaddress.ip_address(parsed.hostname).is_loopback) and
+                    not parsed.username and not parsed.password and not parsed.query and not parsed.fragment and
+                    parsed.path in ("/health", "/health/ready", "/api/v1/auth/me") and
+                    (parsed.port is None or parsed.port > 0))
+    except ValueError:
+        safe_url = False
+    if not safe_url:
+        raise ValueError("URL must use loopback HTTP, an approved path and a valid port, without credentials or query")
+    if expected not in (200, 401):
+        raise ValueError("Expected status must be 200 or 401")
+    if type(duration) is not int or type(concurrency) is not int or not (5 <= duration <= 60 and 1 <= concurrency <= 16):
+        raise ValueError("Duration must be 5..60 seconds and concurrency 1..16, both integers")
     deadline = time.monotonic() + duration
 
     def run(_):
@@ -63,7 +74,10 @@ def main(argv=None) -> int:
         parser.error("--max-p95-ms must be positive and finite")
     if args.output is not None and (args.output.exists() or not args.output.parent.is_dir()):
         parser.error("--output requires a new file in an existing directory")
-    report = verify(args.url, args.expected, args.duration, args.concurrency)
+    try:
+        report = verify(args.url, args.expected, args.duration, args.concurrency)
+    except ValueError as error:
+        parser.error(str(error))
     if args.output is not None:
         try:
             with args.output.open("x", encoding="utf-8") as output:
