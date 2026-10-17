@@ -8,6 +8,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 from urllib.parse import urlsplit
 
 import httpx
@@ -34,16 +35,21 @@ def verify(url: str, expected: int, duration: int, concurrency: int) -> dict:
     if type(duration) is not int or type(concurrency) is not int or not (5 <= duration <= 60 and 1 <= concurrency <= 16):
         raise ValueError("Duration must be 5..60 seconds and concurrency 1..16, both integers")
     deadline = time.monotonic() + duration
+    failed = Event()
 
     def run(_):
-        samples = []
-        with httpx.Client(timeout=5, trust_env=False, follow_redirects=False) as client:
-            while time.monotonic() < deadline:
-                start = time.perf_counter()
-                response = client.get(url)
-                assert response.status_code == expected, "Unexpected local HTTP status"
-                samples.append((time.perf_counter() - start) * 1000)
-        return samples
+        try:
+            samples = []
+            with httpx.Client(timeout=5, trust_env=False, follow_redirects=False) as client:
+                while not failed.is_set() and time.monotonic() < deadline:
+                    start = time.perf_counter()
+                    response = client.get(url)
+                    assert response.status_code == expected, "Unexpected local HTTP status"
+                    samples.append((time.perf_counter() - start) * 1000)
+            return samples
+        except Exception:
+            failed.set()
+            raise
 
     started = time.monotonic()
     with ThreadPoolExecutor(max_workers=concurrency) as workers:

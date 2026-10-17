@@ -27,6 +27,12 @@ response body or traceback. An unsuccessful probe emits no JSON success report
 and creates no output file. This is distinct from a completed probe failing its
 latency gate, which retains its JSON measurements.
 
+After any worker failure, other workers stop at their next loop iteration.
+Requests already in flight keep their existing 5-second HTTPX timeout; cancellation is
+cooperative. Test this with two synchronized loopback clients: one returns 503,
+the other returns 200, and a 30-second probe must fail within a 10-second budget
+without stdout JSON or an output file.
+
 ```powershell
 ../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_local_load.py http://127.0.0.1:55921/health --duration 5 --concurrency 1 --max-p95-ms 500
 ```

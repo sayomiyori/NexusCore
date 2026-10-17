@@ -26,3 +26,13 @@
 - Fix: report only the failure class on stderr and exit 1, without a success artifact.
 - Detection: transport/status boundary regressions and an actual CLI connection
   refusal against an exclusively bound, non-listening loopback socket.
+
+## 2026-10-17: Failed concurrent probe continued sending requests
+
+- Symptom: after one client received 503, another issued thousands of requests
+  until the configured duration ended. A 30-second run exceeded a 10-second test budget.
+- Cause: executor shutdown waited for independent worker loops to reach the deadline.
+- Fix: a shared event makes all workers stop scheduling requests after a worker failure.
+  Already in-flight requests retain their existing HTTP timeout.
+- Detection: `test_one_http_failure_stops_the_other_worker_before_duration`
+  coordinates two real loopback clients and asserts early failure without a report.
