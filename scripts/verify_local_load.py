@@ -43,7 +43,7 @@ def verify(url: str, expected: int, duration: int, concurrency: int) -> dict:
         "requests": len(samples), "duration_seconds": round(elapsed, 2),
         "concurrency": concurrency, "expected_status": expected,
         "requests_per_second": round(len(samples) / elapsed, 2),
-        "p95_ms": round(samples[int((len(samples) - 1) * .95)], 2),
+        "p95_ms": round(samples[math.ceil(len(samples) * .95) - 1], 2),
         "max_ms": round(samples[-1], 2),
     }
     print(json.dumps(report))

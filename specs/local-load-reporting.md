@@ -8,8 +8,9 @@ remain unchanged.
 ## Latency gate
 
 `--max-p95-ms NUMBER` accepts a positive finite number. The CLI compares it to
-the reported `p95_ms` (rounded to two decimal places, using the existing sample
-selection). Equality passes. A higher p95 exits with code 1 and an explanatory
+the reported `p95_ms` (rounded to two decimal places). p95 selects the sorted
+sample at one-based rank `ceil(0.95 * requests)`. For two samples, p95 is the
+slower request. Equality passes. A higher p95 exits with code 1 and an explanatory
 stderr message; stdout still contains the normal JSON report. An invalid limit
 exits with code 2 before any HTTP request. Omitting the flag preserves existing
 behavior. `verify()` keeps its existing signature and return value.

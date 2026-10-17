@@ -81,6 +81,20 @@ class LocalLoadTests(unittest.TestCase):
                 verify("http://127.0.0.1/health", 200, 5, 1)
             factory.assert_called_once_with(timeout=5, trust_env=False, follow_redirects=False)
 
+    def test_short_sample_p95_does_not_hide_a_slow_request_from_gate(self):
+        with patch("scripts.verify_local_load.httpx.Client") as factory, \
+                patch("scripts.verify_local_load.time.monotonic", side_effect=[0, 0, 0, 1, 6, 6]), \
+                patch("scripts.verify_local_load.time.perf_counter", side_effect=[0, .001, 0, .1]), \
+                contextlib.redirect_stdout(io.StringIO()) as output, \
+                contextlib.redirect_stderr(io.StringIO()):
+            factory.return_value.__enter__.return_value.get.return_value = httpx.Response(200)
+            result = main(["http://127.0.0.1/health", "--duration", "5", "--concurrency", "1",
+                           "--max-p95-ms", "50"])
+        self.assertEqual(result, 1)
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["requests"], 2)
+        self.assertEqual(report["p95_ms"], 100)
+
     def test_latency_gate_accepts_below_and_equal_limit_and_rejects_above(self):
         for p95, expected_exit in ((12.33, 0), (12.34, 0), (12.35, 1)):
             with self.subTest(p95=p95), \
