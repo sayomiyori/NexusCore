@@ -17,3 +17,12 @@
   before URL parsing and CLI usage exit code 2.
 - Detection: `test_invalid_probe_inputs_are_usage_errors_without_input_disclosure`
   verifies malformed URLs, unsafe destinations and bounds without opening a client.
+
+## 2026-10-17: HTTP probe failures leaked exception details in tracebacks
+
+- Symptom: connection, timeout, protocol and unexpected-status failures bypassed
+  the CLI failure contract and printed exception details.
+- Cause: worker failures propagated through the executor without CLI handling.
+- Fix: report only the failure class on stderr and exit 1, without a success artifact.
+- Detection: transport/status boundary regressions and an actual CLI connection
+  refusal against an exclusively bound, non-listening loopback socket.

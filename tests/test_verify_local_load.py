@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -187,6 +188,45 @@ class LocalLoadTests(unittest.TestCase):
                     contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
                 main(["http://127.0.0.1/health", "--output", str(destination)])
             self.assertEqual(error.exception.code, 2)
+            self.assertFalse(destination.exists())
+
+    def test_transport_and_status_failures_are_safe_cli_failures_without_reports(self):
+        failures = (httpx.ConnectError("synthetic-private-connection"),
+                    httpx.ReadTimeout("synthetic-private-timeout"),
+                    httpx.RemoteProtocolError("synthetic-private-protocol"), None)
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__), tempfile.TemporaryDirectory() as directory, \
+                    patch("scripts.verify_local_load.httpx.Client") as factory, \
+                    patch("scripts.verify_local_load.time.monotonic", side_effect=[0, 0, 0]), \
+                    contextlib.redirect_stdout(io.StringIO()) as output, \
+                    contextlib.redirect_stderr(io.StringIO()) as errors:
+                client = factory.return_value.__enter__.return_value
+                client.get.side_effect = failure
+                client.get.return_value = httpx.Response(503, text="synthetic-private-body")
+                destination = Path(directory) / "report.json"
+                self.assertEqual(main(["http://127.0.0.1/health", "--concurrency", "1",
+                                       "--output", str(destination)]), 1)
+                self.assertFalse(destination.exists())
+                self.assertEqual(output.getvalue(), "")
+                self.assertIn("Local HTTP probe failed", errors.getvalue())
+                self.assertNotIn("synthetic-private", errors.getvalue())
+                self.assertNotIn("Traceback", errors.getvalue())
+
+    def test_cli_connection_refusal_has_no_traceback_or_report(self):
+        script = Path(__file__).resolve().parents[1] / "scripts/verify_local_load.py"
+        with socket.socket() as bound, tempfile.TemporaryDirectory() as directory:
+            bound.bind(("127.0.0.1", 0))
+            url = f"http://127.0.0.1:{bound.getsockname()[1]}/health"
+            destination = Path(directory) / "report.json"
+            result = subprocess.run(
+                [sys.executable, str(script), url, "--concurrency", "1", "--output", str(destination)],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("Local HTTP probe failed (ConnectError)", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertNotIn(url, result.stderr)
             self.assertFalse(destination.exists())
 
     def test_output_open_or_write_failure_is_reported_as_error(self):

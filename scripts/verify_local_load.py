@@ -78,6 +78,9 @@ def main(argv=None) -> int:
         report = verify(args.url, args.expected, args.duration, args.concurrency)
     except ValueError as error:
         parser.error(str(error))
+    except (httpx.HTTPError, AssertionError) as error:
+        print(f"Local HTTP probe failed ({type(error).__name__}); details withheld", file=sys.stderr)
+        return 1
     if args.output is not None:
         try:
             with args.output.open("x", encoding="utf-8") as output:

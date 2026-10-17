@@ -21,6 +21,12 @@ Whitespace/control characters are rejected before URL normalization.
 Invalid probe inputs exit with code 2 and a static explanation, without echoing
 the URL or a traceback. Optimized Python remains rejected before HTTP.
 
+HTTP connection, timeout, protocol and unexpected-status failures exit with
+code 1. Stderr identifies the failure class without exception details, URL,
+response body or traceback. An unsuccessful probe emits no JSON success report
+and creates no output file. This is distinct from a completed probe failing its
+latency gate, which retains its JSON measurements.
+
 ```powershell
 ../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_local_load.py http://127.0.0.1:55921/health --duration 5 --concurrency 1 --max-p95-ms 500
 ```
