@@ -187,6 +187,49 @@ No `.wslconfig` or distribution configuration was edited. No real Telegram/LLM
 was enabled. Forced termination, sleep/resume, Windows reboot and load remain
 outside this acceptance. Private backups and receipts are not published.
 
+## Full scanner re-verification on 2026-10-17
+
+The combined command passed on source revision `2e9de1c` with the cached images
+documented above:
+
+```powershell
+../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_telegram_ai.py --scanners
+```
+
+Docker Desktop was initially stopped. Native `docker desktop start --timeout 180`
+exited 0 on Desktop 4.95.0 / Engine 29.8.2 without manual IPC repair. File hashes
+were saved before startup; the read-only main database/container baseline was
+captured after startup and before creating either fixture. All 35 retained smoke
+scanners stayed stopped with `restart=no` after Desktop startup.
+
+The controlled AI fixture passed real issuer/tenant/bot admission, PostgreSQL and
+broker outages, consumed-notification recovery, lost-admission-receipt replay and
+automatic restarts of all four permanent scanners. Exactly one generation,
+usage, reply and canonical send remained; publication attempts were two. Tenant,
+deactivation, conflict and duplicate denials passed; legacy AI tables stayed empty.
+
+The separate legacy fixture passed upload/Celery/PostgreSQL-chunk verification,
+JWT denials and exactly two events/deliveries/signed numeric-IP callbacks. Its API
+restarted in the same container without Redis: live 200, ready 503, retained
+event identity, HMAC/API-key 401 and shared PostgreSQL quota 429. Broker recovery
+and the legacy scanner's automatic restart introduced no duplicate delivery.
+
+Both credential-free receipts match the current driver/fixture source hashes.
+All 23 new containers stopped without OOM; the five scanners exited 143 with
+`restart=no`, while other processes exited 0. All 358 pre-existing container IDs,
+images, start/finish times, restart counts/policies and running/OOM states matched
+the pre-smoke inventory. All 224 existing volumes were retained; six new fixture
+volumes were retained as well. Main rows/schema/sequences/metadata, nine container
+definitions, upload contents/modes and configuration/WSL hashes were unchanged.
+All six available main healthchecks were healthy. Forty-three root regressions,
+Ruff and compilation passed. No application code change was needed.
+
+One unfiltered read-only inventory query reported a missing rw-layer snapshot
+for a pre-existing dead container in another project. Narrow inspection worked
+and its runtime metadata matched the baseline; that unrelated storage issue was
+not repaired or deleted. This did not fail either owned fixture. Raw operational
+snapshots and local receipts remain private and are not published.
+
 ## Regression commands
 
 On 2026-10-14, offline legacy admission and recovery passed with the updated
