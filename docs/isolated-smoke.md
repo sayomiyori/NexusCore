@@ -268,6 +268,37 @@ rows/schema/sequences/metadata, uploads and protected configuration/WSL hashes
 matched; nine main containers remained running and all six healthchecks healthy.
 Forty-three root regressions, Ruff, compilation and `git diff --check` passed.
 
+## Full scanner smoke with safe inventory on 2026-10-18
+
+The combined `scripts/verify_telegram_ai.py --scanners` command passed on revision
+`da72edc` with the cached images documented above. JSON inventory explicitly used
+`--size=false` before, during and after the run: 381 containers before, 404 after.
+The old dead worker was retained and did not interrupt any inventory query.
+Unmeasured `Size` placeholders were not used as storage evidence.
+
+The controlled AI fixture passed PostgreSQL/broker outages, consumed-notification
+and lost-admission-receipt recovery, and automatic restarts of all four permanent
+scanners. Exactly one generation, usage, reply and canonical send remained;
+publication attempts were two. Duplicate/conflict/tenant/deactivation denials passed.
+The separate legacy fixture passed upload/Celery/PostgreSQL checks, API restart
+without Redis with live 200 / ready 503, retained event identity/quota/HMAC, and
+exactly two signed numeric-IP callbacks without repeats after scanner restart.
+
+Both receipts match the current driver/fixture source hashes. All 23 new
+containers stopped without OOM: the five scanners exited 143 with `restart=no`,
+the other 18 exited 0. All 40 previously completed scanners stayed stopped with
+unchanged identities/start/finish times/restart counts/policies; all 45 retained
+scanners now have `restart=no`.
+
+All 381 pre-existing container definitions/runtime records, existing networks,
+cached image IDs and 230 volume records matched the before-run baseline. Six new
+fixture volumes were retained, bringing the total to 236. Main database
+rows/schema/sequences/metadata, uploads and configuration/WSL hashes matched;
+nine main containers remained running and all six healthchecks healthy.
+Forty-three root regressions, Ruff and compilation passed. No application fix,
+shared Docker/WSL restart or real Telegram/LLM activation was needed. Operational
+snapshots and receipts remain private.
+
 ## Regression commands
 
 On 2026-10-14, offline legacy admission and recovery passed with the updated
