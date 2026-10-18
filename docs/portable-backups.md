@@ -34,3 +34,7 @@ datasets; this is not a whole-stack backup or an off-host storage service.
 Test actual restore before relying on a copy. Source permissions, database
 consistency, scheduling, retention, upload/database coordination and off-host
 access are separate operational responsibilities.
+
+The [2026-10-19 synthetic restore acceptance](portable-restore-2026-10-19.md)
+verified Windows encryption, Linux decryption and PostgreSQL custom-dump restore
+without touching deployment data. It does not establish off-host recovery.
