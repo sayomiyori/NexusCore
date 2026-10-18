@@ -57,6 +57,16 @@ are added to the report. Omitting the flag writes no file.
 Choose a new output filename for every run; directories are not created implicitly.
 A write failure can leave an incomplete new file; exit code 2 marks that failure.
 
+Output symlinks/junctions, including dangling links, are rejected before HTTP.
+If a final-component link is inserted during the probe, exclusive native output
+creation must fail without creating/modifying its target. Reuse the portable
+backup tool's native creation logic in a small standard-library-only helper,
+since both tools need the same guarantee. POSIX output mode is 0600; Windows
+inherits the trusted parent's ACL. Keep CLI exit codes/report format unchanged.
+No cryptography dependency is introduced into the HTTP probe. Test both a
+pre-existing dangling link (no HTTP) and links inserted during the probe.
+Reject device outputs instead of silently discarding a report or backup key.
+
 ## Acceptance
 
 - Cover below/equal/above threshold and zero, negative, NaN and infinite limits.

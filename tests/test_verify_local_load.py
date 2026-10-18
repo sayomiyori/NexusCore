@@ -147,7 +147,7 @@ class LocalLoadTests(unittest.TestCase):
 
     def test_cli_without_latency_limit_preserves_defaults(self):
         with patch("scripts.verify_local_load.verify", return_value={"p95_ms": 99999}) as probe, \
-                patch("scripts.verify_local_load.Path.open") as writer, \
+                patch("scripts.verify_local_load.new_descriptor") as writer, \
                 contextlib.redirect_stderr(io.StringIO()) as errors:
             self.assertEqual(main(["http://127.0.0.1/health"]), 0)
         probe.assert_called_once_with("http://127.0.0.1/health", 200, 30, 8)
@@ -189,6 +189,45 @@ class LocalLoadTests(unittest.TestCase):
                 main(["http://127.0.0.1/health", "--output", str(destination)])
             self.assertEqual(error.exception.code, 2)
             self.assertFalse(destination.exists())
+
+    def test_output_link_is_rejected_before_probe_even_when_dangling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination, target = (Path(directory) / name for name in ("report.json", "target.json"))
+            try:
+                destination.symlink_to(target)
+            except OSError:
+                self.skipTest("Symlink creation is unavailable")
+            with patch("scripts.verify_local_load.verify", return_value={"p95_ms": 1}) as probe, \
+                    contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+                main(["http://127.0.0.1/health", "--output", str(destination)])
+            self.assertEqual(error.exception.code, 2)
+            probe.assert_not_called()
+            self.assertTrue(destination.is_symlink())
+            self.assertFalse(target.exists())
+
+    def test_output_link_created_during_probe_never_redirects_report(self):
+        for occupied in (False, True):
+            with self.subTest(occupied=occupied), tempfile.TemporaryDirectory() as directory:
+                destination, target = (Path(directory) / name for name in ("report.json", "target.json"))
+                if occupied:
+                    target.write_bytes(b"preserved")
+                try:
+                    destination.symlink_to(target)
+                    destination.unlink()
+                except OSError:
+                    self.skipTest("Symlink creation is unavailable")
+
+                def probe(*args, destination=destination, target=target):
+                    destination.symlink_to(target)
+                    return {"p95_ms": 1}
+
+                with patch("scripts.verify_local_load.verify", side_effect=probe) as request, \
+                        contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+                    main(["http://127.0.0.1/health", "--output", str(destination)])
+                self.assertEqual(error.exception.code, 2)
+                request.assert_called_once()
+                self.assertTrue(destination.is_symlink())
+                self.assertEqual(target.read_bytes() if occupied else target.exists(), b"preserved" if occupied else False)
 
     def test_transport_and_status_failures_are_safe_cli_failures_without_reports(self):
         failures = (httpx.ConnectError("synthetic-private-connection"),
@@ -233,10 +272,11 @@ class LocalLoadTests(unittest.TestCase):
         for operation in ("open", "write"):
             with self.subTest(operation=operation), tempfile.TemporaryDirectory() as directory, \
                     patch("scripts.verify_local_load.verify", return_value={"p95_ms": 1}), \
-                    patch("scripts.verify_local_load.Path.open") as writer, \
+                    patch("scripts.verify_local_load.new_descriptor", return_value=-1) as descriptor, \
+                    patch("scripts.verify_local_load.os.fdopen") as writer, \
                     contextlib.redirect_stderr(io.StringIO()) as errors:
                 if operation == "open":
-                    writer.side_effect = PermissionError
+                    descriptor.side_effect = PermissionError
                 else:
                     writer.return_value.__enter__.return_value.write.side_effect = OSError
                 with self.assertRaises(SystemExit) as error:

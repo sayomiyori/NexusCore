@@ -15,6 +15,7 @@ plaintext output. The key is read from a file, never an argument value or stdout
 All outputs use exclusive creation and mode 0600 where supported. Parent
 directories must already exist and be trusted; Windows access follows their ACLs.
 Existing files, directories and final-component symlinks are never overwritten.
+Output device handles such as Windows `NUL` are rejected before writing bytes.
 Inputs must be regular files; plaintext is capped at 16 MiB, ciphertext at 24 MiB.
 Fernet operates in memory; large production archives need a streaming backup tool.
 

@@ -79,3 +79,21 @@
 - Detection: real CLI key generation/decryption into a dangling link both fail;
   a link inserted immediately before the native open also leaves its target absent.
   Invalid CLI syntax additionally uses static diagnostics to withhold arguments.
+
+## 2026-10-19: Local load report followed a dangling output link on Windows
+
+- Symptom: a symbolic link inserted during the HTTP probe redirected `--output`
+  to an absent target; the CLI returned success after writing there. A pre-existing
+  dangling link also passed the `exists()` preflight check.
+- Cause: `Path.open("x")` used Windows CRT exclusive-creation semantics, which
+  followed the link rather than rejecting its final component.
+- Fix: reject links before HTTP and share the portable-backup tool's native
+  exclusive creator in `scripts/local_files.py`. The helper uses only the standard
+  library; probe report format and exit codes stay unchanged.
+- Detection: before/after regressions cover a pre-existing dangling link and
+  a link inserted during the probe, with absent and occupied targets. The target
+  remains absent/unchanged, with usage exit 2; a pre-existing link sends no HTTP.
+- Additional boundary: native `CREATE_NEW` could open Windows `NUL` as a character
+  device and silently discard a backup key/report. The shared creator checks
+  `GetFileType` before writing, closes non-disk handles and fails. The device
+  regression checks both native creation and the actual backup CLI.

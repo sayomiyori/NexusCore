@@ -4,6 +4,7 @@ import argparse
 import ipaddress
 import json
 import math
+import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -12,6 +13,11 @@ from threading import Event
 from urllib.parse import urlsplit
 
 import httpx
+
+if __package__:
+    from .local_files import new_descriptor
+else:
+    from local_files import new_descriptor
 
 
 def verify(url: str, expected: int, duration: int, concurrency: int) -> dict:
@@ -78,7 +84,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.max_p95_ms is not None and (not math.isfinite(args.max_p95_ms) or args.max_p95_ms <= 0):
         parser.error("--max-p95-ms must be positive and finite")
-    if args.output is not None and (args.output.exists() or not args.output.parent.is_dir()):
+    if args.output is not None and (args.output.exists() or args.output.is_symlink() or
+                                    args.output.is_junction() or not args.output.parent.is_dir()):
         parser.error("--output requires a new file in an existing directory")
     try:
         report = verify(args.url, args.expected, args.duration, args.concurrency)
@@ -89,7 +96,7 @@ def main(argv=None) -> int:
         return 1
     if args.output is not None:
         try:
-            with args.output.open("x", encoding="utf-8") as output:
+            with os.fdopen(new_descriptor(args.output), "w", encoding="utf-8") as output:
                 output.write(json.dumps(report) + "\n")
         except OSError:
             parser.error("Cannot create or write --output report")

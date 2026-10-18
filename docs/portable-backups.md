@@ -21,6 +21,7 @@ must be new and its parent must exist. The key is read from its file and never
 printed. Copy it to separately protected recovery storage, apart from the token;
 never commit it or paste it into commands/logs. Losing it prevents decryption.
 Do not put decrypted production dumps in Git, public directories or shared temp.
+Outputs must be regular files; device destinations such as Windows `NUL` fail.
 
 The tool exits 0 only after writing/flushing the complete new file. Authentication,
 size and I/O failures exit 1 with static diagnostics; CLI syntax errors exit 2.

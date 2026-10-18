@@ -175,6 +175,15 @@ class BackupArtifactTests(unittest.TestCase):
             self.assertNotIn(b"synthetic-private", result.stderr)
             self.assertNotIn(b"Traceback", result.stderr)
 
+    def test_device_output_cannot_discard_a_backup_key(self):
+        device = self.root / "NUL" if os.name == "nt" else Path(os.devnull)
+        with self.assertRaises(OSError):
+            backup.new_descriptor(device)
+        result = self.cli("keygen", "--output", device)
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn(b"PASS", result.stdout)
+        self.assertNotIn(b"Traceback", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
