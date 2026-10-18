@@ -67,3 +67,15 @@
 - Detection: the real before/after comparison passes; injected custom DNS,
   changed restart policy and changed stopped-container start time each fail.
   See [the 45-scanner restart acceptance](isolated-smoke.md#native-desktop-restart-with-45-completed-scanners-on-2026-10-18).
+
+## 2026-10-19: Windows exclusive creation followed a dangling symbolic link
+
+- Symptom: the first portable-backup implementation used CRT `O_EXCL`, which
+  followed an existing dangling file link and created its absent target on Windows.
+- Cause: the CRT file-open semantics did not provide the required final-component
+  reparse-point protection, despite exclusive creation flags.
+- Fix: Windows output creation uses native `CreateFileW` with `CREATE_NEW` and
+  `FILE_FLAG_OPEN_REPARSE_POINT`. POSIX retains `O_EXCL` and `O_NOFOLLOW`.
+- Detection: real CLI key generation/decryption into a dangling link both fail;
+  a link inserted immediately before the native open also leaves its target absent.
+  Invalid CLI syntax additionally uses static diagnostics to withhold arguments.

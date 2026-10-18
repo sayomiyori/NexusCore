@@ -28,3 +28,6 @@ Workflow permissions are read-only; checkout credentials are not persisted.
 These checks cover verification-tool regressions. For actual service/scanner
 acceptance, follow [the isolated smoke guide](isolated-smoke.md); a green root
 test suite is not evidence of live Telegram/LLM, Docker or production readiness.
+
+The same environment runs [portable backup artifact encryption](portable-backups.md).
+Its tests use generated keys and disposable files, never deployment data.

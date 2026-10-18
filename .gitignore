@@ -8,6 +8,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+*.backup-key
+*.fernet
 
 # Local AI assistant working notes and verification artifacts
 AGENTS.md
