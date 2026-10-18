@@ -299,6 +299,48 @@ Forty-three root regressions, Ruff and compilation passed. No application fix,
 shared Docker/WSL restart or real Telegram/LLM activation was needed. Operational
 snapshots and receipts remain private.
 
+## Native Desktop restart with 45 completed scanners on 2026-10-18
+
+With all 45 completed scanners stopped and `restart=no`, the explicitly requested
+native command passed on Desktop 4.95.0 (242831), CLI / Engine 29.8.2:
+
+```powershell
+docker desktop restart --timeout 180
+```
+
+It exited 0 in 20.782 seconds and changed the Desktop session and all nine main
+container start times. No manual IPC recovery, forced termination, volume cleanup,
+WSL command or configuration edit was performed. Two post-restart inspections
+194 seconds apart retained every scanner ID, last start/finish time, exit code
+and restart count; all 45 remained stopped with `restart=no`.
+
+All 404 container identities/images and 236 volume records were retained. All
+395 previously stopped containers kept their process-state fingerprints. Main
+definitions/mounts, database rows/schema/sequences/metadata, uploads,
+`.env`/release/WSL hashes and Desktop preferences matched the before baseline.
+All nine main processes were running without OOM and six healthchecks healthy;
+HTTP `/health` on 28080, 8001, 8014 and 8080 returned 200. Both workers logged fresh
+readiness without tracebacks; the main legacy scanner reported only `submitted=0`.
+Main platform flags stayed disabled and provider credentials remained empty;
+no real Telegram/LLM was enabled. Safe JSON inventory with `--size=false` returned
+all 404 containers, including the unchanged old dead worker.
+
+The strict configuration comparison initially detected `null` to `[]` changes
+in three empty DNS fields of 46 recently created fixture containers. Reversing
+only those fields reproduced all 46 original definition hashes; other inspected
+configuration was unchanged. The private comparator now checks this exact case
+and rejects injected custom DNS, changed restart policy or stopped start time.
+See [the diagnostic](ERRORS.md#2026-10-18-native-docker-restart-changed-empty-dns-field-representation).
+Existing network descriptors and image IDs matched; only the built-in bridge ID
+and dynamic main network endpoint fields changed during restart.
+
+Redis db1 retained all 17 logical values and absolute expiries. Db2/db3 each
+retained the same three keys, types and expiries; one existing Celery binding set
+in each gained one member and lost none. No Redis restore or key cleanup occurred.
+Private before/after hashes and command receipts are retained locally. This checks
+one native restart; Windows reboot, forced failure and sleep/resume are outside
+this acceptance.
+
 ## Regression commands
 
 On 2026-10-14, offline legacy admission and recovery passed with the updated

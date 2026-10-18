@@ -52,3 +52,18 @@
   with `--size=false`, plain metadata and `docker inspect` pass. The all-container
   metadata query returns all 381 retained containers without a daemon error.
   See [the command and preservation evidence](isolated-smoke.md#dead-container-inventory-diagnosis-on-2026-10-18).
+
+## 2026-10-18: Native Docker restart changed empty DNS field representation
+
+- Symptom: a strict definition fingerprint comparison failed for 46 recently
+  created, stopped fixture containers after a successful native Desktop restart.
+- Cause: inspection changed `HostConfig.Dns`, `DnsOptions` and `DnsSearch` from
+  `null` to `[]`. Reversing only those three fields reconstructed each original
+  full Config/HostConfig/mounts hash; process timestamps and restart counts matched.
+- Fix: the private acceptance comparator first checks the raw hash. On mismatch,
+  it accepts only three actual empty DNS lists whose reversal reproduces the exact
+  before hash. All other configuration and stopped-process checks remain strict.
+  Docker settings, containers and WSL are not modified by this comparison.
+- Detection: the real before/after comparison passes; injected custom DNS,
+  changed restart policy and changed stopped-container start time each fail.
+  See [the 45-scanner restart acceptance](isolated-smoke.md#native-desktop-restart-with-45-completed-scanners-on-2026-10-18).
