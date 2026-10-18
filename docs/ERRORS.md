@@ -36,3 +36,19 @@
   Already in-flight requests retain their existing HTTP timeout.
 - Detection: `test_one_http_failure_stops_the_other_worker_before_duration`
   coordinates two real loopback clients and asserts early failure without a report.
+
+## 2026-10-18: JSON Docker inventory requested an unavailable dead-container size
+
+- Symptom: `docker ps --all --format '{{json .}}'` failed with
+  `rw layer snapshot not found for container ...` for an old worker in another project.
+- Cause: Docker CLI 29.8.2 expands JSON through formatter methods, including `Size`,
+  and implicitly requests sizes. Engine 29.8.2 then receives `NotFound` from the
+  containerd snapshotter's writable-layer usage query. Metadata inspection succeeds;
+  the historical cause of the missing snapshot is unknown.
+- Workaround: pass `--size=false` explicitly for metadata inventory. Its `Size: 0B`
+  is an unmeasured placeholder, not evidence that the container contains no data.
+  The container remains `dead`; no layer recovery or deletion was performed.
+- Detection: filtered JSON and explicit `--size` fail for that ID; filtered JSON
+  with `--size=false`, plain metadata and `docker inspect` pass. The all-container
+  metadata query returns all 381 retained containers without a daemon error.
+  See [the command and preservation evidence](isolated-smoke.md#dead-container-inventory-diagnosis-on-2026-10-18).

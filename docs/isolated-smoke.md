@@ -230,6 +230,44 @@ and its runtime metadata matched the baseline; that unrelated storage issue was
 not repaired or deleted. This did not fail either owned fixture. Raw operational
 snapshots and local receipts remain private and are not published.
 
+## Dead-container inventory diagnosis on 2026-10-18
+
+The earlier warning reproduces with Docker CLI / Engine 29.8.2 and the containerd
+overlayfs snapshotter. A pre-existing worker in another Compose project remains
+`dead`; ordinary inspection succeeds and reports no attached mounts. This does
+not establish that its writable layer has no data or that its project has no volumes.
+
+`docker ps --all --format '{{json .}}'` implicitly requests container sizes:
+the CLI's [JSON formatter](https://github.com/docker/cli/blob/v29.8.2/cli/command/formatter/reflect.go)
+invokes `Size`, which [enables the size request unless explicitly disabled](https://github.com/docker/cli/blob/v29.8.2/cli/command/container/list.go).
+The running Engine's [layer-size query](https://github.com/moby/moby/blob/8af9fe3/daemon/containerd/service.go)
+returns the reported error when the snapshotter cannot find that container's
+writable-layer usage. Why the historical snapshot became unavailable is unknown.
+
+Use an explicit metadata-only query:
+
+```powershell
+docker ps --all --size=false --format '{{json .}}'
+docker ps --all --filter status=dead --format '{{.ID}}|{{.Names}}|{{.Status}}'
+```
+
+Both commands exited 0; the first returned all 381 containers, including the dead
+worker. Filtered JSON without the flag and explicit `--size` each exited 1 for
+the same ID; filtered metadata and ordinary `docker inspect` exited 0. Ignore
+the JSON `Size: 0B` placeholder: no size was measured. Existing fixture ownership
+checks already use quiet IDs followed by inspection and need no code change.
+
+This workaround restores metadata inventory, not the dead container or its
+snapshot. No container, image, layer or volume was removed; Docker/WSL were not
+restarted or reconfigured, and no Telegram/LLM was enabled. Raw inspection and
+command receipts remain private.
+
+Before/after comparison retained all 381 container identities, runtime states,
+images, restart counts/policies and mounts, and all 230 volume names. Main database
+rows/schema/sequences/metadata, uploads and protected configuration/WSL hashes
+matched; nine main containers remained running and all six healthchecks healthy.
+Forty-three root regressions, Ruff, compilation and `git diff --check` passed.
+
 ## Regression commands
 
 On 2026-10-14, offline legacy admission and recovery passed with the updated
