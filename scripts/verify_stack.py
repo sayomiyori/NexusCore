@@ -478,13 +478,20 @@ print(json.dumps(request(data['url'],data['method'],payload,data['headers'],allo
     def stop(self):
         items = self.owned(cleanup=True)
         scanner_ids = [items[name]["Id"] for name in self.scanners if name in items]
+        applications = [name for name, item in items.items()
+                        if name not in {"postgres", "redis", "callback"} and item["State"]["Running"]]
         try:
             if scanner_ids:
                 self.run(["docker", "update", "--restart=no", *scanner_ids])
+            if applications:
+                self.compose("stop", "--timeout", "30", *applications)
         finally:
             self.compose("stop", "--timeout", "10")
         items = self.owned(cleanup=True)
         require(all(not item["State"]["Running"] for item in items.values()), "Fixture did not stop")
+        require(all(not item["State"]["OOMKilled"] for item in items.values()), "Fixture cleanup observed OOM")
+        require(all(item["State"]["ExitCode"] in ({0, 143} if name in self.scanners else {0})
+                    for name, item in items.items()), "Fixture cleanup observed unexpected exit code")
         require(all(items[name]["HostConfig"]["RestartPolicy"] == {"Name": "no", "MaximumRetryCount": 0}
                     for name in self.scanners if name in items), "Fixture scanner restart remains enabled")
 

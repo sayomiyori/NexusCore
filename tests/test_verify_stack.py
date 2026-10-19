@@ -192,7 +192,7 @@ class StackSmokeTests(unittest.TestCase):
                            "Labels": {"com.docker.compose.project": PROJECT, "com.docker.compose.service": "legacy_scanner"}},
                 "HostConfig": {"Init": True, "RestartPolicy": {"Name": "on-failure", "MaximumRetryCount": 2}},
                 "NetworkSettings": {"Networks": {PROJECT + "_default": {}}},
-                "State": {"Running": True}}
+                "State": {"Running": True, "OOMKilled": False, "ExitCode": 143}}
         network = {"Internal": True, "Labels": {"com.docker.compose.project": PROJECT},
                    "IPAM": {"Config": [{"Subnet": smoke.fixture_subnet(PROJECT)}]}}
         calls = []
@@ -213,7 +213,7 @@ class StackSmokeTests(unittest.TestCase):
                     return subprocess.CompletedProcess(command, 1, "synthetic-details-must-not-leak", "")
                 item["HostConfig"]["RestartPolicy"] = {"Name": "no", "MaximumRetryCount": 0}
                 output = "owned-scanner"
-            elif command[-3:] == ["stop", "--timeout", "10"]:
+            elif command[-3:] == ["stop", "--timeout", "10"] or command[-4:] == ["stop", "--timeout", "30", "legacy_scanner"]:
                 if not update_error:
                     self.assertEqual(item["HostConfig"]["RestartPolicy"]["Name"], "no")
                 item["State"]["Running"] = False

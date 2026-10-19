@@ -97,3 +97,22 @@
   device and silently discard a backup key/report. The shared creator checks
   `GetFileType` before writing, closes non-disk handles and fails. The device
   regression checks both native creation and the actual backup CLI.
+
+## 2026-10-19: Smoke receipt accepted a worker killed during parallel teardown
+
+- Symptom: the full scanner/load smoke returned a successful receipt while one
+  stopped AI worker had exit 137 and `OOMKilled=false`.
+- Cause: final proof checked only stopped state and scanner policy. Teardown
+  stopped applications and dependencies in parallel: Redis received SIGTERM at
+  08:53:54.116 UTC and exited before the worker logged warm shutdown at
+  08:53:54.166; Docker killed the worker after the 10-second grace period. The
+  exact internal Celery shutdown wait was not established from those logs.
+- Fix: stop running owned APIs/workers/scanners first with a 30-second grace
+  period, keeping database/broker/callback alive. Always stop infrastructure
+  afterward, including on error. Reject final OOM and unexpected exit codes;
+  scanners retain their permitted SIGTERM exit 143.
+- Detection: Docker-boundary tests enforce the order/fallback and reject 137,
+  exit 1 and OOM despite stopped state. Existing scanner policy tests remain.
+  A targeted owned-fixture rehearsal restarted only its Redis and affected
+  worker: Celery ping passed, the worker exited 0 before Redis exited 0, all
+  14 containers stopped, and the four completed scanners never restarted.

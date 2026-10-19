@@ -32,3 +32,11 @@ and no external socket/directory cleanup or forced process termination. Verify
 the signed supported Desktop release and compare main/scanner/data fingerprints;
 distinguish Desktop settings schema migration from changing WSL configuration.
 No real Telegram/LLM, main rollout, global cleanup or new dependency.
+
+Final teardown must keep PostgreSQL, Redis and the callback alive while running
+APIs/workers/scanners stop, with a bounded 30-second application grace period.
+Then stop remaining infrastructure with the existing 10-second bound, including
+when application stop fails. Disable scanner restart before sending stop.
+Final proof must reject OOM and nonzero application/infrastructure exit codes;
+scanners may exit 0 or their expected SIGTERM code 143. A forced 137 must fail
+the receipt rather than masquerade as a successful stopped fixture.
