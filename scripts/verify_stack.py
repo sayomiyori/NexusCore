@@ -51,6 +51,7 @@ FLAGS = ("PLATFORM_BOTS_ENABLED", "PLATFORM_TELEGRAM_ENABLED", "TELEGRAM_REPLIES
 EXTERNAL = ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
             "MCP_SERVERS", "MCP_SERVERS_CONFIG", "SENTRY_DSN")
 LOAD_FILES = ("verify_local_load.py", "local_files.py")
+API_FILES = (*LOAD_FILES, "verify_metrics.py")
 LOAD_PATHS = {"auth_service": "/health", "webhook_service": "/health/ready", "agent_service": "/health"}
 
 
@@ -271,7 +272,7 @@ def smoke_config(images, scanners=False):
     for name in LOAD_PATHS:
         services[name]["volumes"] = [*services[name].get("volumes", []), *[
             {"type": "bind", "source": str(Path(__file__).with_name(filename).resolve()),
-             "target": "/verification/" + filename, "read_only": True} for filename in LOAD_FILES]]
+             "target": "/verification/" + filename, "read_only": True} for filename in API_FILES]]
     return {"services": services, "networks": {"default": {"internal": True}},
             "volumes": {"uploads": {}, "postgres_data": {}, "redis_data": {}}}
 
@@ -338,7 +339,7 @@ def validate_config(config, project, images, controlled_ai=False, scanners=False
                            volume["target"] == "/verification/verify_telegram_ai.py"
                            or name in LOAD_PATHS and any(
                                Path(volume["source"]) == Path(__file__).with_name(filename).resolve() and
-                               volume["target"] == "/verification/" + filename for filename in LOAD_FILES)))
+                               volume["target"] == "/verification/" + filename for filename in API_FILES)))
             require(allowed, "Unsafe fixture mount")
         environment = service.get("environment", {})
         traffic_settings(name, environment, controlled_ai)
@@ -426,7 +427,7 @@ class Fixture:
                         or self.controlled_ai and name not in {"postgres", "redis"} and
                         mount["Destination"] == "/verification/verify_telegram_ai.py"
                         or name in LOAD_PATHS and mount["Destination"] in {
-                            "/verification/" + filename for filename in LOAD_FILES}), "Unexpected bind mount")
+                            "/verification/" + filename for filename in API_FILES}), "Unexpected bind mount")
                 else:
                     require(mount["Type"] == "tmpfs", "Unexpected container storage")
             result[name] = item
@@ -721,13 +722,32 @@ def verify(fixture):
             "concurrent_admissions": 4, "standalone_query_rejection": 422, "scanner_restarts": scanner_proof}
 
 
-def verify_load(fixture, report):
-    fixture.stage = "bounded isolated HTTP load"
+def require_owned_apis(fixture):
     fixture.config()
     items = fixture.owned()
     require(all(name in items and items[name]["Id"] == fixture.items[name]["Id"] and
                 items[name]["State"]["Running"] and not items[name]["State"]["OOMKilled"]
-                for name in LOAD_PATHS), "Load requires original running owned APIs")
+                for name in LOAD_PATHS), "Probes require original running owned APIs")
+
+
+def verify_metrics(fixture, report):
+    fixture.stage = "isolated exporter and platform-denial metrics"
+    require_owned_apis(fixture)
+    report["source_sha256"] = hashlib.sha256(Path(__file__).with_name("verify_metrics.py").read_bytes()).hexdigest()
+    report["checks"] = {}
+    for name in LOAD_PATHS:
+        measured = json.loads(fixture.compose("exec", "-T", name, "python", "-B", "/verification/verify_metrics.py", name,
+                             *(["--platform"] if fixture.controlled_ai else [])))
+        report["checks"][name] = measured
+        status = {"webhook_service": 503, "agent_service": 404}.get(name, 200) if fixture.controlled_ai else 200
+        require(measured["status"] == status and measured["exported"] is (status == 200),
+                "Unexpected isolated metrics boundary")
+    print("PASS: existing exporters and closed platform-global metrics", flush=True)
+
+
+def verify_load(fixture, report):
+    fixture.stage = "bounded isolated HTTP load"
+    require_owned_apis(fixture)
     report["profile"] = {"duration_seconds": 5, "concurrency": 4, "max_p95_ms": 500}
     report["source_sha256"] = {filename: hashlib.sha256(Path(__file__).with_name(filename).read_bytes()).hexdigest()
                                for filename in LOAD_FILES}
@@ -770,6 +790,8 @@ def main(argv=None):
         report["callback_origin"] = fixture.callback_origin
         fixture.stage = "HTTP and worker smoke"
         report["checks"] = verify(fixture)
+        report["metrics"] = {}
+        verify_metrics(fixture, report["metrics"])
         if args.load:
             report["load"] = {}
             verify_load(fixture, report["load"])

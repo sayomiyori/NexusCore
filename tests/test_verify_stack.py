@@ -116,6 +116,7 @@ class StackSmokeTests(unittest.TestCase):
         for enabled, failed in ((False, False), (True, False), (True, True)):
             with self.subTest(enabled=enabled, failed=failed), tempfile.TemporaryDirectory() as directory, \
                     patch.object(smoke, "Fixture") as boundary, patch.object(smoke, "verify", return_value={}), \
+                    patch.object(smoke, "verify_metrics"), \
                     contextlib.redirect_stdout(io.StringIO()):
                 fixture = boundary.return_value
                 fixture.project, fixture.directory, fixture.images = PROJECT, Path(directory), smoke.IMAGES
@@ -187,7 +188,8 @@ class StackSmokeTests(unittest.TestCase):
 
     def test_cleanup_failure_cannot_leave_a_successful_receipt(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(smoke, "Fixture") as boundary, \
-                patch.object(smoke, "verify", return_value={}), contextlib.redirect_stdout(io.StringIO()):
+                patch.object(smoke, "verify", return_value={}), patch.object(smoke, "verify_metrics"), \
+                contextlib.redirect_stdout(io.StringIO()):
             fixture = boundary.return_value
             fixture.project = PROJECT
             fixture.directory = Path(directory)

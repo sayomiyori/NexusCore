@@ -75,6 +75,51 @@ separately rehearsed before this full rerun; see the
 [recorded cause and fix](ERRORS.md#2026-10-19-smoke-receipt-accepted-a-worker-killed-during-parallel-teardown).
 No historical receipt or test volume was deleted or rewritten.
 
+## Existing metrics exporters and platform closures
+
+Both smoke drivers now check `/metrics` after functional verification and before
+optional load. Each request executes on container loopback inside an inspected
+owned API, with a five-second socket timeout and a 1 MiB response limit. There
+is no proxy, redirect or caller-supplied destination.
+
+Standalone Auth, WebHook and Agent exporters must return HTTP 200, `text/plain`
+and their existing required Prometheus `# TYPE` markers. In the controlled AI
+fixture, Auth keeps its current exporter, WebHook must return its existing 503
+denial and Agent its existing 404 denial. The denied responses must contain only
+the known JSON `detail`; global metrics are not enabled to make the checks pass.
+
+Receipts retain only status, export/denial state, required family names, byte
+counts and the probe source hash. Raw response bodies, sample values and label
+values are not printed or saved. This is endpoint/marker acceptance, not full
+Prometheus grammar validation, a new monitoring deployment, tenant-safe metrics
+aggregation or an event/log pipeline. See the
+[metrics acceptance contract](../specs/isolated-metrics-smoke.md).
+
+### Metrics boundary acceptance on 2026-10-19
+
+The full `verify_telegram_ai.py --scanners --load` command passed again with
+metrics enabled: controlled project `nexus-smoke-3a4e4a09350b45c49ed3afe118f4f133`,
+then standalone project `nexus-smoke-8d6b9ee79aa84df29e2bf127bd72d4fb`.
+
+| API | Standalone | Controlled platform | Required families checked |
+| --- | ---: | ---: | --- |
+| Auth | 200 | 200 | `auth_register_total`, `active_sessions_total` |
+| WebHook | 200 | 503 | `webhooks_received_total`, `deliveries_total` only in standalone |
+| Agent | 200 | 404 | `documents_total`, `chunks_total`, `llm_requests_total` only in standalone |
+
+Both receipts record probe SHA-256
+`7f5e1436cc1b3a9d1af48b2909cfd7d18c56b2ae50efbd35232d9791a1523e20`.
+The six subsequent load gates also passed (p95 5.36–9.40 ms). All 23 new
+containers stopped without OOM with restart disabled: 18 exit 0, five scanners
+exit 143. Six owned volumes were retained.
+
+The final comparison preserved every pre-existing 455-container/251-volume
+record, all networks/images/protected files and all 55 completed scanner states.
+Main database/upload/container/configuration and WSL fingerprints matched the
+original baseline. Final inventory: 478 containers, 257 volumes, 60 completed
+scanners, only the original nine containers running. No data was removed,
+service source changed or real Telegram/LLM enabled.
+
 Each command owns a new `nexus-smoke-<uuid>` Compose project, private internal
 network and new PostgreSQL/Redis/uploads volumes. It reads no root `.env`, needs
 no external test database, publishes no host ports, pulls/builds no images and

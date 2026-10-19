@@ -39,6 +39,7 @@ class ControlledAISmokeTests(unittest.TestCase):
             with self.subTest(enabled=enabled), tempfile.TemporaryDirectory() as directory, \
                     patch.object(ai.smoke, "Fixture") as boundary, patch.object(ai, "verify", return_value={}), \
                     patch.object(ai.smoke, "verify_load") as load, patch.object(ai.smoke, "main") as legacy, \
+                    patch.object(ai.smoke, "verify_metrics"), \
                     contextlib.redirect_stdout(io.StringIO()):
                 fixture = boundary.return_value
                 fixture.project, fixture.directory, fixture.images = PROJECT, Path(directory), smoke.IMAGES
@@ -191,6 +192,7 @@ class ControlledAISmokeTests(unittest.TestCase):
     def test_cleanup_failure_produces_failed_safe_receipt_without_running_legacy(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(ai.smoke, "Fixture") as boundary, \
                 patch.object(ai, "verify", return_value={}), patch.object(ai.smoke, "main") as legacy, \
+                patch.object(ai.smoke, "verify_metrics"), \
                 contextlib.redirect_stdout(io.StringIO()):
             fixture = boundary.return_value
             fixture.project = PROJECT

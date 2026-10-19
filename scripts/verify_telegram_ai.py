@@ -444,6 +444,8 @@ def main(argv=None):
         report["callback_origin"] = fixture.callback_origin
         fixture.stage = "controlled issuer and setup"
         report["checks"] = verify(fixture)
+        report["metrics"] = {}
+        smoke.verify_metrics(fixture, report["metrics"])
         if args.load:
             report["load"] = {}
             smoke.verify_load(fixture, report["load"])
