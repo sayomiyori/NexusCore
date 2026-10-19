@@ -140,6 +140,91 @@ class BackupArtifactTests(unittest.TestCase):
         self.assertNotIn(b"synthetic-private", result.stderr)
         self.assertFalse(missing_parent.exists())
 
+    def test_input_link_substituted_at_open_never_redirects_dump_or_key(self):
+        for role in ('dump', 'key'):
+            with self.subTest(role=role):
+                target = self.source if role == 'dump' else self.key
+                original = target.read_bytes()
+                candidate = self.root / f'raced-{role}'
+                candidate.write_bytes(original)
+                actual = backup.read_descriptor
+
+                def raced(path, candidate=candidate, target=target, actual=actual):
+                    if path == candidate:
+                        path.unlink()
+                        try:
+                            path.symlink_to(target)
+                        except OSError:
+                            self.skipTest('Symlink creation is unavailable')
+                    return actual(path)
+
+                source = candidate if role == 'dump' else self.source
+                key = candidate if role == 'key' else self.key
+                with patch.object(backup, 'read_descriptor', side_effect=raced), \
+                        contextlib.redirect_stdout(io.StringIO()) as stdout, \
+                        contextlib.redirect_stderr(io.StringIO()) as stderr:
+                    result = backup.main(['encrypt', str(source), '--key-file', str(key), '--output', str(self.output)])
+                self.assertEqual(result, 1)
+                self.assertFalse(self.output.exists())
+                self.assertEqual(stdout.getvalue(), '')
+                self.assertNotIn(str(self.root), stderr.getvalue())
+                self.assertTrue(candidate.is_symlink())
+                self.assertEqual(target.read_bytes(), original)
+
+    def test_device_input_is_rejected_without_creating_output(self):
+        device = self.root / 'NUL' if os.name == 'nt' else Path(os.devnull)
+        result = self.cli('encrypt', device, '--key-file', self.key, '--output', self.output)
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse(self.output.exists())
+        self.assertEqual(result.stdout, b'')
+        self.assertNotIn(b'Traceback', result.stderr)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows handle ownership regression')
+    def test_native_input_allows_readers_and_blocks_writes_and_deletion_until_close(self):
+        original = self.source.read_bytes()
+        descriptor = backup.read_descriptor(self.source)
+        try:
+            self.assertEqual(backup.read_file(self.source, 1024), original)
+            with self.assertRaises(OSError):
+                self.source.write_bytes(b'must not replace input during read')
+            with self.assertRaises(OSError):
+                self.source.unlink()
+        finally:
+            os.close(descriptor)
+        self.assertEqual(self.source.read_bytes(), original)
+        self.source.write_bytes(b'owned input writable after close')
+        self.assertEqual(self.source.read_bytes(), b'owned input writable after close')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows handle ownership regression')
+    def test_native_input_handles_close_on_conversion_or_validation_failure(self):
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        from scripts import local_files
+
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.GetFileType.argtypes = [wintypes.HANDLE]
+        kernel.GetFileType.restype = wintypes.DWORD
+        actual = msvcrt.open_osfhandle
+        for phase in ('conversion', 'validation'):
+            with self.subTest(phase=phase):
+                handles = []
+
+                def convert(handle, flags, phase=phase, handles=handles):
+                    handles.append(handle)
+                    if phase == 'conversion':
+                        raise OSError('synthetic conversion failure')
+                    return actual(handle, flags)
+
+                with patch('msvcrt.open_osfhandle', side_effect=convert), \
+                        patch.object(local_files.os, 'fstat', side_effect=OSError('synthetic validation failure')), \
+                        self.assertRaises(OSError):
+                    local_files.read_descriptor(self.source)
+                self.assertEqual(len(handles), 1)
+                self.assertEqual(kernel.GetFileType(handles[0]), 0)
+                self.assertEqual(ctypes.get_last_error(), 6)
+
     def test_dangling_symlink_output_and_creation_race_never_create_target(self):
         target = self.root / "redirected-plaintext"
         link = self.root / "dangling"

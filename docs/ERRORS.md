@@ -1,5 +1,17 @@
 # Verification tooling errors
 
+## 2026-10-19: Windows backup input opens followed a substituted file link
+
+- Symptom: replacing a synthetic dump with a symlink after path validation
+  redirected `read_file()` to another synthetic file.
+- Cause: Windows CRT `os.open()` followed final-component reparse points;
+  `O_NOFOLLOW` was unavailable and the preliminary path check could race.
+- Fix: native existing-file opens use `OPEN_REPARSE_POINT`; reject non-disk
+  handles and reparse attributes before reading. Share only readers, retain
+  handle cleanup and POSIX nonblocking/no-follow plus regular-file validation.
+- Detection: dump/key links inserted at the open boundary fail without an
+  artifact; device inputs and existing exclusive-output regressions also pass.
+
 ## 2026-10-19: Load requests buffered and decompressed unlimited response bodies
 
 - Symptom: a synthetic 1 MiB health response was fully loaded and accepted.

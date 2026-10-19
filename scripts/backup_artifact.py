@@ -9,9 +9,9 @@ from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
 
 if __package__:
-    from .local_files import new_descriptor
+    from .local_files import new_descriptor, read_descriptor
 else:
-    from local_files import new_descriptor
+    from local_files import new_descriptor, read_descriptor
 
 MAX_PLAINTEXT = 16 * 1024 * 1024
 MAX_CIPHERTEXT = 24 * 1024 * 1024
@@ -25,8 +25,7 @@ class Parser(argparse.ArgumentParser):
 def read_file(path: Path, limit: int) -> bytes:
     if path.is_symlink() or path.is_junction():
         raise ValueError("Input must be a regular file")
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-    with os.fdopen(os.open(path, flags), "rb") as source:
+    with os.fdopen(read_descriptor(path), "rb") as source:
         if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
             raise ValueError("Input must be a regular file")
         data = source.read(limit + 1)

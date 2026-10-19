@@ -19,6 +19,16 @@ Output device handles such as Windows `NUL` are rejected before writing bytes.
 Inputs must be regular files; plaintext is capped at 16 MiB, ciphertext at 24 MiB.
 Fernet operates in memory; large production archives need a streaming backup tool.
 
+Input no-follow enforcement must apply when the file is opened, including a
+final-component link substituted after the preliminary path check. On Windows,
+open the reparse point itself and reject its handle attributes before reading
+bytes; accept only disk regular files. Share reads, but deny concurrent writes
+and deletion while reading. POSIX keeps nonblocking `O_NOFOLLOW` plus handle-type
+validation. Close handles on validation/descriptor-conversion failure. Parent
+directories remain trusted; this does not add a filesystem sandbox or reject
+ordinary hard links. Test dump and key substitution races using synthetic files,
+input devices and existing output regressions, then run full checks/fresh review.
+
 Missing/malformed keys, wrong keys, corruption, oversized/nonregular input and
 I/O errors fail with static diagnostics and exit 1. Invalid CLI syntax exits 2.
 Never echo key material, paths, data or exception details. Failed authentication
