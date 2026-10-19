@@ -1,5 +1,16 @@
 # Verification tooling errors
 
+## 2026-10-19: Load requests buffered and decompressed unlimited response bodies
+
+- Symptom: a synthetic 1 MiB health response was fully loaded and accepted.
+- Cause: `client.get()` eagerly read/decompressed each body despite the tool
+  needing only status and response latency.
+- Fix: use the HTTPX streaming context and count raw payload bytes, with a
+  64 KiB per-response limit and no body retention/decompression. Existing worker
+  failure cancellation and static CLI failure handling remain in force.
+- Detection: empty/exact-limit/compressed bodies, oversized and interrupted
+  streams, status-before-body checks and real fixed/chunked loopback CLI failures.
+
 ## 2026-10-19: Load CLI syntax errors disclosed supplied argument values
 
 - Symptom: a nonnumeric `--duration` value appeared verbatim in stderr.

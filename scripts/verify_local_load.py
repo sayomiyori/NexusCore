@@ -19,6 +19,8 @@ if __package__:
 else:
     from local_files import new_descriptor
 
+MAX_RESPONSE_BYTES = 64 * 1024
+
 
 class Parser(argparse.ArgumentParser):
     def error(self, message):
@@ -54,8 +56,12 @@ def verify(url: str, expected: int, duration: int, concurrency: int) -> dict:
             with httpx.Client(timeout=5, trust_env=False, follow_redirects=False) as client:
                 while not failed.is_set() and time.monotonic() < deadline:
                     start = time.perf_counter()
-                    response = client.get(url)
-                    assert response.status_code == expected, "Unexpected local HTTP status"
+                    with client.stream("GET", url) as response:
+                        assert response.status_code == expected, "Unexpected local HTTP status"
+                        size = 0
+                        for chunk in response.iter_raw():
+                            size += len(chunk)
+                            assert size <= MAX_RESPONSE_BYTES, "Local HTTP response exceeds size limit"
                     samples.append((time.perf_counter() - start) * 1000)
             return samples
         except Exception:

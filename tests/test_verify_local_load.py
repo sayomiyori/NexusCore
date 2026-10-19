@@ -13,7 +13,7 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 
@@ -115,15 +115,17 @@ class LocalLoadTests(unittest.TestCase):
         for url, status in (("http://127.0.0.1/health", 200), ("http://[::1]/health/ready", 200),
                             ("http://localhost/api/v1/auth/me", 401)):
             with self.subTest(url=url):
-                client = Mock()
-                client.get.return_value = httpx.Response(status, text="synthetic-private-body")
+                client = MagicMock()
+                response = client.stream.return_value.__enter__.return_value
+                response.status_code = status
+                response.iter_raw.return_value = (b"synthetic-private-body",)
                 with patch("scripts.verify_local_load.httpx.Client") as factory, \
                         patch("scripts.verify_local_load.time.monotonic", side_effect=[0, 0, 0, 6, 6]), \
                         contextlib.redirect_stdout(io.StringIO()) as output:
                     factory.return_value.__enter__.return_value = client
                     report = verify(url, status, 5, 1)
                 factory.assert_called_once_with(timeout=5, trust_env=False, follow_redirects=False)
-                client.get.assert_called_once_with(url)
+                client.stream.assert_called_once_with("GET", url)
                 self.assertEqual(report["requests"], 1)
                 self.assertEqual(report["expected_status"], status)
                 self.assertEqual(json.loads(output.getvalue()), report)
@@ -133,7 +135,7 @@ class LocalLoadTests(unittest.TestCase):
     def test_unexpected_redirect_is_rejected(self):
         with patch("scripts.verify_local_load.httpx.Client") as factory, \
                 patch("scripts.verify_local_load.time.monotonic", side_effect=[0, 0, 0]):
-            factory.return_value.__enter__.return_value.get.return_value = httpx.Response(
+            factory.return_value.__enter__.return_value.stream.return_value.__enter__.return_value = httpx.Response(
                 302, headers={"location": "https://example.com/health"},
             )
             with self.assertRaisesRegex(AssertionError, "Unexpected local HTTP status"):
@@ -146,7 +148,9 @@ class LocalLoadTests(unittest.TestCase):
                 patch("scripts.verify_local_load.time.perf_counter", side_effect=[0, .001, 0, .1]), \
                 contextlib.redirect_stdout(io.StringIO()) as output, \
                 contextlib.redirect_stderr(io.StringIO()):
-            factory.return_value.__enter__.return_value.get.return_value = httpx.Response(200)
+            response = factory.return_value.__enter__.return_value.stream.return_value.__enter__.return_value
+            response.status_code = 200
+            response.iter_raw.return_value = ()
             result = main(["http://127.0.0.1/health", "--duration", "5", "--concurrency", "1",
                            "--max-p95-ms", "50"])
         self.assertEqual(result, 1)
@@ -268,8 +272,8 @@ class LocalLoadTests(unittest.TestCase):
                     contextlib.redirect_stdout(io.StringIO()) as output, \
                     contextlib.redirect_stderr(io.StringIO()) as errors:
                 client = factory.return_value.__enter__.return_value
-                client.get.side_effect = failure
-                client.get.return_value = httpx.Response(503, text="synthetic-private-body")
+                client.stream.side_effect = failure
+                client.stream.return_value.__enter__.return_value = httpx.Response(503, text="synthetic-private-body")
                 destination = Path(directory) / "report.json"
                 self.assertEqual(main(["http://127.0.0.1/health", "--concurrency", "1",
                                        "--output", str(destination)]), 1)

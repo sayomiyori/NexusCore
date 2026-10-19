@@ -36,3 +36,10 @@ The load CLI returns static diagnostics and exit 2 for all argument errors,
 including malformed numeric values and unknown options. It never echoes rejected
 arguments. Runtime HTTP failures retain static diagnostics and exit 1; `--help`
 remains available. See [the local probe safety contract](../specs/local-load-safety.md).
+
+The probe streams raw response payloads without buffering or decompressing the
+whole body. Each response must be at most 64 KiB, regardless of Content-Length;
+oversized fixed-length or chunked responses fail without a success report.
+Latency includes the entire accepted response. This bounds response payload,
+not total process memory or a wall-clock deadline: the five-second HTTP timeout
+limits inactivity, so a trickling peer can extend a run beyond its duration.
