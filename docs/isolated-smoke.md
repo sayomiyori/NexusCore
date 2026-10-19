@@ -120,6 +120,58 @@ original baseline. Final inventory: 478 containers, 257 volumes, 60 completed
 scanners, only the original nine containers running. No data was removed,
 service source changed or real Telegram/LLM enabled.
 
+### Full scanner smoke after tooling safety fixes on 2026-10-19
+
+Repeated the complete scanner/load command on source `4ef0619`, after the CLI
+privacy, raw-response limit and backup-input handle fixes:
+
+```powershell
+& ../WebHook_Manager/.venv/Scripts/python.exe -B scripts/verify_telegram_ai.py --scanners --load
+```
+
+The command exited 0. Controlled AI project
+`nexus-smoke-115eb25a16e945d58d54a7de0593536a` and subsequent standalone project
+`nexus-smoke-c229f7fcfded43bda96421a6ca3f3a65` both recorded `passed=true`,
+`owned_containers_stopped=true` and `external_calls_enabled=false`.
+
+The controlled chain retained exactly one generation/usage/reply/send after
+PostgreSQL, broker and consumed-notification faults, a deliberately lost admission
+receipt and all four automatic scanner restarts. Tenant/deactivation denials and
+duplicate/conflict checks passed. Standalone upload/Celery/PostgreSQL, login/JWT,
+API restart without Redis (live 200, ready 503, durable quota/event/HMAC), two signed callbacks and the
+fifth scanner restart passed. Metrics remained 200/503/404 for controlled platform
+and 200/200/200 for standalone.
+
+| Fixture | API | Requests | p95 ms |
+| --- | --- | ---: | ---: |
+| Controlled AI | Auth health | 5,877 | 5.15 |
+| Controlled AI | WebHook readiness | 2,608 | 12.17 |
+| Controlled AI | Agent health | 4,251 | 6.62 |
+| Standalone | Auth health | 5,170 | 6.44 |
+| Standalone | WebHook readiness | 2,763 | 9.36 |
+| Standalone | Agent health | 3,821 | 8.17 |
+
+Each load probe used four clients for five seconds, HTTP 200 and the 500 ms p95
+gate. Both receipts match current source hashes:
+`cdeead2db31666854b022beeb0721e04035bbf26c65f4e29c00ef04f38392e96`
+for `verify_local_load.py` and
+`99abae4e27f1558b1353251c0c80e71b6027873713b6e7b4f6527f9f23601f89`
+for `local_files.py`. These short health/readiness results are not production
+capacity measurements.
+
+The before/after comparison preserved all 478 original containers, 257 volumes,
+networks/images, protected files and 60 completed scanner states. Main rows,
+schema/sequences/metadata, uploads, nine container definitions and deployment/WSL
+fingerprints matched. All 23 new containers stopped without OOM and with restart
+disabled; their six volumes were retained. Final inventory: 501 containers,
+263 volumes, 65 stopped scanners; only the original nine containers running.
+
+All 85 root regressions, Ruff and compilation passed. No implementation fix was
+needed. Receipts and private integrity snapshots remain under `.venv`; existing
+data, user work and WSL settings were not changed. Docker Desktop itself was not
+restarted. This smoke does not exercise portable backup encryption/restore;
+the separate native Windows backup regressions remain part of the root suite.
+
 Each command owns a new `nexus-smoke-<uuid>` Compose project, private internal
 network and new PostgreSQL/Redis/uploads volumes. It reads no root `.env`, needs
 no external test database, publishes no host ports, pulls/builds no images and
