@@ -493,6 +493,53 @@ Private before/after hashes and command receipts are retained locally. This chec
 one native restart; Windows reboot, forced failure and sleep/resume are outside
 this acceptance.
 
+## Native Desktop restart with 65 completed scanners on 2026-10-19
+
+Repeated the explicitly requested native command on signed Docker Desktop
+4.95.0 (242831), CLI / Engine 29.8.2:
+
+```powershell
+docker desktop restart --timeout 180
+```
+
+It exited 0 in 19.507 seconds, changed the Desktop session and restarted all nine
+original running containers with their existing IDs/images/configuration. No
+manual IPC recovery, forced termination, WSL command, settings edit, data restore
+or resource cleanup was performed. Platform flags stayed disabled and real
+provider credentials stayed empty before and after restart.
+
+Both post-restart samples, 184.927 seconds apart, preserved every one of the
+65 completed scanner IDs, last start/finish times, exit codes and restart counts.
+All stayed stopped with `restart=no`. All 492 previously stopped containers kept
+their process-state fingerprints. All 501 identities/images, 263 volume records,
+custom networks and image IDs were retained. Only the built-in bridge network ID
+and dynamic main endpoint fields changed.
+
+All nine main processes were running without OOM, with six healthchecks healthy.
+HTTP `/health` returned 200 on 28080, 8001, 8014 and 8080. Both workers logged
+fresh readiness without tracebacks; 54 inspected main recovery scans reported
+only `submitted=0`. Main database rows/schema/sequences/metadata, uploads,
+`.env`/release/WSL fingerprints and Desktop preferences matched the baseline.
+
+Ninety-seven stopped definitions changed only empty DNS representation: 92 from
+three `null` fields to `[]`, five from `(null, [], [])` to `([], [], [])`.
+Reconstructing only those fields reproduced every original full definition hash.
+The private comparator was extended for this exact mixed case; seven negative
+checks reject semantic/runtime/data drift. Initial failed-comparison evidence was
+retained. See [the diagnosis](ERRORS.md#2026-10-19-restart-comparison-rejected-mixed-empty-dns-representations).
+
+Redis db1 retained all 17 logical values and absolute expiries. Db2/db3 each kept
+the same three keys/types/expiries; one existing Celery binding set per database
+gained one member and lost none. This is observed broker metadata change, not a
+Redis restore or application-value change. Safe JSON inventory used `--size=false`
+and retained the existing dead worker without requesting its unavailable size.
+
+Independent read-only/security review checked the saved snapshots, current
+scanner state, DNS reconstruction and data preservation. No application or Docker
+configuration fix was needed. Private command receipts and comparisons remain
+under `.venv`. This verifies one native restart, not Windows reboot, forced
+failure, sleep/resume or live Telegram/LLM behavior.
+
 ## Regression commands
 
 On 2026-10-14, offline legacy admission and recovery passed with the updated

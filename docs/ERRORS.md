@@ -1,5 +1,19 @@
 # Verification tooling errors
 
+## 2026-10-19: Restart comparison rejected mixed empty DNS representations
+
+- Symptom: after a successful native restart, the resource comparator rejected
+  five stopped container definitions while all scanner process states matched.
+- Cause: the previous representation proof assumed all three DNS fields were
+  `null`. These five had `Dns=null` with `DnsOptions=[]` and `DnsSearch=[]`.
+- Fix: only when all three observed fields are empty lists, test at most eight
+  null/list combinations and require an exact match to the original complete
+  Config/HostConfig/mount hash. No other field or running definition is normalized.
+- Detection: all 97 changed hashes were reproduced exactly (92 all-null, five
+  mixed). Negative checks reject custom DNS, policy, stopped start time/restart
+  count, missing volume, Redis absolute-expiry and WSL hash drift. Initial failed
+  comparison artifacts were retained; no container or host settings were changed.
+
 ## 2026-10-19: Windows backup input opens followed a substituted file link
 
 - Symptom: replacing a synthetic dump with a symlink after path validation
