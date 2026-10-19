@@ -31,3 +31,8 @@ test suite is not evidence of live Telegram/LLM, Docker or production readiness.
 
 The same environment runs [portable backup artifact encryption](portable-backups.md).
 Its tests use generated keys and disposable files, never deployment data.
+
+The load CLI returns static diagnostics and exit 2 for all argument errors,
+including malformed numeric values and unknown options. It never echoes rejected
+arguments. Runtime HTTP failures retain static diagnostics and exit 1; `--help`
+remains available. See [the local probe safety contract](../specs/local-load-safety.md).

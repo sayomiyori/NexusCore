@@ -1,5 +1,15 @@
 # Verification tooling errors
 
+## 2026-10-19: Load CLI syntax errors disclosed supplied argument values
+
+- Symptom: a nonnumeric `--duration` value appeared verbatim in stderr.
+- Cause: the default argparse formatter included rejected values and unknown
+  options before the tool's safe validation/runtime handlers ran.
+- Fix: use static parser diagnostics for every argument error, preserving exit 2
+  and normal help. Runtime transport failures keep their safe exit-1 contract.
+- Detection: malformed numeric/status values, unknown options, extra positional
+  arguments and missing values fail before HTTP without input disclosure.
+
 ## 2026-10-17: Short-sample p95 could pass a failed latency gate
 
 - Symptom: two requests taking 1 ms and 100 ms passed `--max-p95-ms 50`.

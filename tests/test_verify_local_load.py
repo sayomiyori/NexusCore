@@ -53,6 +53,14 @@ class LocalLoadTests(unittest.TestCase):
             ["http://127.0.0.1/health?synthetic-private-key=value"],
             ["http://127.0.0.1/health", "--duration", "4"],
             ["http://127.0.0.1/health", "--concurrency", "17"],
+            ["http://127.0.0.1/health", "--duration", "synthetic-private-duration"],
+            ["http://127.0.0.1/health", "--concurrency", "synthetic-private-concurrency"],
+            ["http://127.0.0.1/health", "--expected", "synthetic-private-status"],
+            ["http://127.0.0.1/health", "--expected", "418"],
+            ["http://127.0.0.1/health", "--max-p95-ms", "synthetic-private-limit"],
+            ["http://127.0.0.1/health", "--synthetic-private-option"],
+            ["http://127.0.0.1/health", "synthetic-private-extra"],
+            ["http://127.0.0.1/health", "--output"],
         )
         with patch("scripts.verify_local_load.httpx.Client") as client:
             for arguments in cases:
@@ -62,6 +70,7 @@ class LocalLoadTests(unittest.TestCase):
                     self.assertEqual(error.exception.code, 2)
                     self.assertNotIn("synthetic-private", errors.getvalue())
                     self.assertNotIn("Traceback", errors.getvalue())
+                    self.assertIn("Invalid arguments; details withheld", errors.getvalue())
             client.assert_not_called()
 
     def test_direct_probe_rejects_unsupported_status_before_http(self):
@@ -70,6 +79,25 @@ class LocalLoadTests(unittest.TestCase):
                 with self.subTest(status=status), self.assertRaisesRegex(ValueError, "Expected status"):
                     verify("http://127.0.0.1/health", status, 5, 1)
             client.assert_not_called()
+
+    def test_actual_cli_syntax_errors_withhold_arguments_and_keep_help(self):
+        script = Path(__file__).resolve().parents[1] / "scripts/verify_local_load.py"
+        for arguments in (("--duration", "synthetic-private-value"), ("--synthetic-private-option",)):
+            with self.subTest(arguments=arguments):
+                result = subprocess.run(
+                    [sys.executable, str(script), "http://127.0.0.1:1/health", *arguments],
+                    capture_output=True, text=True, timeout=10, check=False,
+                )
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("Invalid arguments; details withheld", result.stderr)
+                self.assertNotIn("synthetic-private", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+        result = subprocess.run([sys.executable, str(script), "--help"], capture_output=True,
+                                text=True, timeout=10, check=False)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--max-p95-ms", result.stdout)
+        self.assertEqual(result.stderr, "")
 
     def test_optimization_cannot_disable_url_guard(self):
         script = Path(__file__).resolve().parents[1] / "scripts/verify_local_load.py"
@@ -80,7 +108,7 @@ class LocalLoadTests(unittest.TestCase):
                     env={**os.environ, **environment}, capture_output=True, text=True, timeout=10, check=False,
                 )
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("Optimized Python disables safety assertions", result.stderr)
+                self.assertIn("Invalid arguments; details withheld", result.stderr)
                 self.assertNotIn("ConnectError", result.stderr)
 
     def test_loopback_get_and_report_without_proxy_redirect_or_body(self):
@@ -282,7 +310,7 @@ class LocalLoadTests(unittest.TestCase):
                 with self.assertRaises(SystemExit) as error:
                     main(["http://127.0.0.1/health", "--output", str(Path(directory) / "report.json")])
             self.assertEqual(error.exception.code, 2)
-            self.assertIn("Cannot create or write --output report", errors.getvalue())
+            self.assertIn("Invalid arguments; details withheld", errors.getvalue())
 
     def test_cli_gate_and_export_against_isolated_http_server(self):
         paths = []

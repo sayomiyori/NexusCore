@@ -20,6 +20,11 @@ else:
     from local_files import new_descriptor
 
 
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        super().error("Invalid arguments; details withheld")
+
+
 def verify(url: str, expected: int, duration: int, concurrency: int) -> dict:
     if sys.flags.optimize:
         raise ValueError('Optimized Python disables safety assertions')
@@ -74,7 +79,7 @@ def verify(url: str, expected: int, duration: int, concurrency: int) -> dict:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = Parser(description=__doc__)
     parser.add_argument("url")
     parser.add_argument("--expected", type=int, choices=(200, 401), default=200)
     parser.add_argument("--duration", type=int, default=30)
