@@ -50,6 +50,8 @@ FLAGS = ("PLATFORM_BOTS_ENABLED", "PLATFORM_TELEGRAM_ENABLED", "TELEGRAM_REPLIES
          "PLATFORM_TENANT_ENABLED", "PLATFORM_READ_ENABLED", "TELEGRAM_AI_ENABLED")
 EXTERNAL = ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
             "MCP_SERVERS", "MCP_SERVERS_CONFIG", "SENTRY_DSN")
+LOAD_FILES = ("verify_local_load.py", "local_files.py")
+LOAD_PATHS = {"auth_service": "/health", "webhook_service": "/health/ready", "agent_service": "/health"}
 
 
 class VerificationError(ValueError):
@@ -266,6 +268,10 @@ def smoke_config(images, scanners=False):
         services["legacy_scanner"] = {**common, "image": images["web"], "environment": web,
             "init": True, "restart": "on-failure:2", "mem_limit": "128m",
             "command": ["python", "-m", LEGACY_SCANNERS["legacy_scanner"][1]]}
+    for name in LOAD_PATHS:
+        services[name]["volumes"] = [*services[name].get("volumes", []), *[
+            {"type": "bind", "source": str(Path(__file__).with_name(filename).resolve()),
+             "target": "/verification/" + filename, "read_only": True} for filename in LOAD_FILES]]
     return {"services": services, "networks": {"default": {"internal": True}},
             "volumes": {"uploads": {}, "postgres_data": {}, "redis_data": {}}}
 
@@ -329,7 +335,10 @@ def validate_config(config, project, images, controlled_ai=False, scanners=False
                            or controlled_ai and name not in {"postgres", "redis", "auth_service"})
                            or controlled_ai and name not in {"postgres", "redis"} and
                            Path(volume["source"]) == Path(__file__).with_name("verify_telegram_ai.py").resolve() and
-                           volume["target"] == "/verification/verify_telegram_ai.py"))
+                           volume["target"] == "/verification/verify_telegram_ai.py"
+                           or name in LOAD_PATHS and any(
+                               Path(volume["source"]) == Path(__file__).with_name(filename).resolve() and
+                               volume["target"] == "/verification/" + filename for filename in LOAD_FILES)))
             require(allowed, "Unsafe fixture mount")
         environment = service.get("environment", {})
         traffic_settings(name, environment, controlled_ai)
@@ -415,7 +424,9 @@ class Fixture:
                         (name in {"callback", "agent_service"} or self.controlled_ai and name not in {"postgres", "redis", "auth_service"})
                         and mount["Destination"] == "/verification/verify_stack.py"
                         or self.controlled_ai and name not in {"postgres", "redis"} and
-                        mount["Destination"] == "/verification/verify_telegram_ai.py"), "Unexpected bind mount")
+                        mount["Destination"] == "/verification/verify_telegram_ai.py"
+                        or name in LOAD_PATHS and mount["Destination"] in {
+                            "/verification/" + filename for filename in LOAD_FILES}), "Unexpected bind mount")
                 else:
                     require(mount["Type"] == "tmpfs", "Unexpected container storage")
             result[name] = item
@@ -710,11 +721,33 @@ def verify(fixture):
             "concurrent_admissions": 4, "standalone_query_rejection": 422, "scanner_restarts": scanner_proof}
 
 
+def verify_load(fixture, report):
+    fixture.stage = "bounded isolated HTTP load"
+    fixture.config()
+    items = fixture.owned()
+    require(all(name in items and items[name]["Id"] == fixture.items[name]["Id"] and
+                items[name]["State"]["Running"] and not items[name]["State"]["OOMKilled"]
+                for name in LOAD_PATHS), "Load requires original running owned APIs")
+    report["profile"] = {"duration_seconds": 5, "concurrency": 4, "max_p95_ms": 500}
+    report["source_sha256"] = {filename: hashlib.sha256(Path(__file__).with_name(filename).read_bytes()).hexdigest()
+                               for filename in LOAD_FILES}
+    report["checks"] = {}
+    for name, path in LOAD_PATHS.items():
+        measured = json.loads(fixture.compose("exec", "-T", name, "python", "-B", "/verification/verify_local_load.py",
+                             "http://127.0.0.1:8000" + path, "--duration", "5", "--concurrency", "4"))
+        report["checks"][name] = measured
+        require(measured["concurrency"] == 4 and measured["expected_status"] == 200 and measured["requests"] >= 4,
+                "Incomplete isolated load measurement")
+        require(0 <= measured["p95_ms"] <= 500, "Isolated load p95 exceeds 500 ms")
+    print("PASS: bounded owned API load; three roles, four clients, p95 <= 500 ms", flush=True)
+
+
 def main(argv=None):
     require(not sys.flags.optimize, "Optimized Python is not supported")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--receiver", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--scanners", action="store_true", help="Verify the permanent legacy scanner with owned outages/restarts")
+    parser.add_argument("--load", action="store_true", help="Probe owned APIs for 5 seconds each with 4 clients and p95 <= 500 ms")
     for kind, image in IMAGES.items():
         option = "webhook" if kind == "web" else kind
         parser.add_argument(f"--{option}-image", default=image)
@@ -737,6 +770,9 @@ def main(argv=None):
         report["callback_origin"] = fixture.callback_origin
         fixture.stage = "HTTP and worker smoke"
         report["checks"] = verify(fixture)
+        if args.load:
+            report["load"] = {}
+            verify_load(fixture, report["load"])
         report["proof"] = fixture.proof()
         report["source_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
         report["passed"] = True

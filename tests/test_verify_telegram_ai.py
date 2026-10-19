@@ -34,6 +34,27 @@ def controlled_config(scanners=False):
 
 
 class ControlledAISmokeTests(unittest.TestCase):
+    def test_load_flag_is_forwarded_to_legacy_only_after_ai_stops(self):
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(ai.smoke, "Fixture") as boundary, patch.object(ai, "verify", return_value={}), \
+                    patch.object(ai.smoke, "verify_load") as load, patch.object(ai.smoke, "main") as legacy, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                fixture = boundary.return_value
+                fixture.project, fixture.directory, fixture.images = PROJECT, Path(directory), smoke.IMAGES
+                fixture.environment, fixture.callback_origin = {}, "http://192.168.1.3:8000"
+                fixture.proof.return_value = {}
+
+                def second(*args, fixture=fixture):
+                    fixture.stop.assert_called_once_with()
+
+                legacy.side_effect = second
+                ai.main(["--scanners", *(["--load"] if enabled else [])])
+                self.assertEqual(load.call_count, int(enabled))
+                self.assertEqual("--load" in legacy.call_args.args[0], enabled)
+                self.assertIn("--scanners", legacy.call_args.args[0])
+                self.assertEqual("load" in json.loads((fixture.directory / "receipt.json").read_text()), enabled)
+
     def test_permanent_scanners_require_exact_real_entrypoints_and_bounded_restart(self):
         good = controlled_config(True)
         smoke.validate_config(good, PROJECT, smoke.IMAGES, True, True)

@@ -41,6 +41,102 @@ def resolved_config(scanners=False):
 
 
 class StackSmokeTests(unittest.TestCase):
+    def test_load_probe_mounts_require_exact_readonly_sources_and_api_roles(self):
+        good = resolved_config()
+        smoke.validate_config(good, PROJECT, smoke.IMAGES)
+        for filename in smoke.LOAD_FILES:
+            for unsafe in ("source", "writable", "target", "role"):
+                with self.subTest(filename=filename, unsafe=unsafe), self.assertRaises(ValueError):
+                    config = copy.deepcopy(good)
+                    mount = next(item for item in config["services"]["auth_service"]["volumes"]
+                                 if item["target"] == "/verification/" + filename)
+                    if unsafe == "source":
+                        mount["source"] = str(Path(smoke.__file__).with_name("backup_artifact.py"))
+                    elif unsafe == "writable":
+                        mount["read_only"] = False
+                    elif unsafe == "target":
+                        mount["target"] = "/verification/other.py"
+                    else:
+                        config["services"]["callback"]["volumes"].append(mount)
+                    smoke.validate_config(config, PROJECT, smoke.IMAGES)
+
+    def test_load_executes_only_loopback_in_original_owned_api_containers(self):
+        fixture = Mock()
+        fixture.items = {name: {"Id": name, "State": {"Running": True, "OOMKilled": False}} for name in smoke.LOAD_PATHS}
+        fixture.owned.return_value = copy.deepcopy(fixture.items)
+        measured = {"requests": 40, "concurrency": 4, "expected_status": 200, "p95_ms": 500}
+        fixture.compose.return_value = json.dumps(measured)
+        report = {}
+        with contextlib.redirect_stdout(io.StringIO()):
+            smoke.verify_load(fixture, report)
+        fixture.config.assert_called_once_with()
+        self.assertEqual(report["checks"], dict.fromkeys(smoke.LOAD_PATHS, measured))
+        self.assertEqual(set(report["source_sha256"]), set(smoke.LOAD_FILES))
+        for call, (name, path) in zip(fixture.compose.call_args_list, smoke.LOAD_PATHS.items(), strict=True):
+            self.assertEqual(call.args, ("exec", "-T", name, "python", "-B", "/verification/verify_local_load.py",
+                                         "http://127.0.0.1:8000" + path, "--duration", "5", "--concurrency", "4"))
+
+    def test_load_refuses_replaced_missing_stopped_or_oom_api_before_exec(self):
+        baseline = {name: {"Id": name, "State": {"Running": True, "OOMKilled": False}} for name in smoke.LOAD_PATHS}
+        for failure in ("identity", "missing", "stopped", "oom", "ownership"):
+            with self.subTest(failure=failure):
+                fixture = Mock()
+                fixture.items = copy.deepcopy(baseline)
+                items = copy.deepcopy(baseline)
+                if failure == "identity":
+                    items["agent_service"]["Id"] = "replacement"
+                elif failure == "missing":
+                    del items["agent_service"]
+                elif failure == "stopped":
+                    items["agent_service"]["State"]["Running"] = False
+                elif failure == "oom":
+                    items["agent_service"]["State"]["OOMKilled"] = True
+                else:
+                    fixture.owned.side_effect = smoke.VerificationError("Container ownership mismatch")
+                fixture.owned.return_value = items
+                with self.assertRaises(ValueError):
+                    smoke.verify_load(fixture, {})
+                fixture.compose.assert_not_called()
+
+    def test_load_gate_retains_failed_measurement_and_stops_scheduling(self):
+        for latency, requests in ((500.01, 40), (float("nan"), 40), (-1, 40), (5, 3)):
+            with self.subTest(latency=latency, requests=requests):
+                fixture = Mock()
+                fixture.items = {name: {"Id": name, "State": {"Running": True, "OOMKilled": False}} for name in smoke.LOAD_PATHS}
+                fixture.owned.return_value = fixture.items
+                fixture.compose.return_value = json.dumps({"requests": requests, "concurrency": 4,
+                                                          "expected_status": 200, "p95_ms": latency})
+                report = {}
+                with self.assertRaises(ValueError):
+                    smoke.verify_load(fixture, report)
+                self.assertEqual(set(report["checks"]), {"auth_service"})
+                fixture.compose.assert_called_once()
+
+    def test_load_cli_receipts_cover_default_success_and_failed_gate_cleanup(self):
+        for enabled, failed in ((False, False), (True, False), (True, True)):
+            with self.subTest(enabled=enabled, failed=failed), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(smoke, "Fixture") as boundary, patch.object(smoke, "verify", return_value={}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                fixture = boundary.return_value
+                fixture.project, fixture.directory, fixture.images = PROJECT, Path(directory), smoke.IMAGES
+                fixture.items = {name: {"Id": name, "State": {"Running": True, "OOMKilled": False}} for name in smoke.LOAD_PATHS}
+                fixture.owned.return_value = fixture.items
+                fixture.callback_origin = "http://192.168.0.4:8000"
+                fixture.proof.return_value = {}
+                fixture.compose.return_value = json.dumps({"requests": 40, "concurrency": 4, "expected_status": 200,
+                                                          "p95_ms": 501 if failed else 5})
+                if failed:
+                    with self.assertRaises(smoke.VerificationError):
+                        smoke.main(["--load"])
+                else:
+                    smoke.main(["--load"] if enabled else [])
+                receipt = json.loads((fixture.directory / "receipt.json").read_text())
+                fixture.stop.assert_called_once_with()
+                self.assertEqual(receipt["passed"], not failed)
+                self.assertTrue(receipt["owned_containers_stopped"])
+                self.assertEqual("load" in receipt, enabled)
+                self.assertEqual(fixture.compose.call_count, (1 if failed else 3) if enabled else 0)
+
     def test_internal_transport_rejects_root_and_uninspected_targets_before_exec(self):
         fixture = object.__new__(smoke.Fixture)
         fixture.addresses = ["192.168.48.4"]

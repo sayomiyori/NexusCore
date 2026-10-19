@@ -20,6 +20,61 @@ in both fixtures. The standalone scanner can also be checked alone:
 ../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_stack.py --scanners
 ```
 
+Add `--load` for a bounded local HTTP baseline after the functional checks:
+
+```powershell
+../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_telegram_ai.py --scanners --load
+```
+
+For each fixture, Auth `/health`, WebHook `/health/ready` and Agent `/health` run
+sequentially for five seconds with four clients and a p95 gate of 500 ms. The
+existing loopback-only probe runs inside each inspected owned API container;
+its two source files are mounted read-only. No host ports or wider URL allowlist
+are needed. `receipt.json` retains measurements/source hashes, including completed
+measurements if a latency gate fails. Any load failure fails the fixture and
+still stops owned containers. Default commands do not run the load stage.
+
+Clients share the API container's resource budget. These short health/readiness
+measurements do not establish production capacity, external-client latency,
+business-operation throughput or a production SLO. See the
+[load acceptance contract](../specs/isolated-load-smoke.md).
+
+### Bounded load acceptance on 2026-10-19
+
+Executed the combined command above after the ordered-teardown fix `9f41d4f`:
+AI project `nexus-smoke-6461ec2d70874c6da8cc0231a219f3aa`, followed by standalone
+project `nexus-smoke-b75968a01eec44a99457ff59b2c5c992`. Both receipts passed,
+including the functional scanner/outage checks and final exit/OOM verification.
+
+| Fixture | API | Requests | p95 ms | Maximum ms |
+| --- | --- | ---: | ---: | ---: |
+| Controlled AI | Auth health | 5,605 | 5.34 | 117.69 |
+| Controlled AI | WebHook readiness | 2,536 | 12.56 | 167.73 |
+| Controlled AI | Agent health | 4,312 | 6.44 | 14.24 |
+| Standalone | Auth health | 5,101 | 6.56 | 63.34 |
+| Standalone | WebHook readiness | 2,789 | 8.60 | 84.03 |
+| Standalone | Agent health | 3,716 | 9.49 | 161.25 |
+
+Each row is a separate five-second/four-client probe expecting HTTP 200. Source
+hashes were `233e20328e5449b31a52b3ec3785d39e0a2bd29664d10ce6201b0efde1130ff3`
+for `verify_local_load.py` and
+`42fb1544d9078c0bc9c15bfa06681bfd8f3e812f163d50f041f18cecd9da6e96`
+for `local_files.py`. The six p95 gates passed; these are local health/readiness
+measurements, not production capacity or business-operation throughput.
+
+The rerun preserved all 432 pre-existing containers, 245 volumes, networks,
+cached images and 50 completed scanner states. All 23 new containers stopped
+with `restart=no`, without OOM: five scanners exited 143, the other 18 exited 0.
+Six owned volumes were retained. Main rows/schema/sequences/metadata, uploads,
+nine container definitions and deployment/WSL configuration hashes were unchanged.
+The initial 409-container/239-volume/45-scanner baseline was also preserved.
+
+An earlier full run exposed a worker forced to exit 137 during parallel cleanup,
+despite a successful receipt. That false-positive cleanup result was fixed and
+separately rehearsed before this full rerun; see the
+[recorded cause and fix](ERRORS.md#2026-10-19-smoke-receipt-accepted-a-worker-killed-during-parallel-teardown).
+No historical receipt or test volume was deleted or rewritten.
+
 Each command owns a new `nexus-smoke-<uuid>` Compose project, private internal
 network and new PostgreSQL/Redis/uploads volumes. It reads no root `.env`, needs
 no external test database, publishes no host ports, pulls/builds no images and

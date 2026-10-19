@@ -421,6 +421,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--receiver", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--scanners", action="store_true", help="Verify permanent recovery loops with owned outages/restarts")
+    parser.add_argument("--load", action="store_true", help="Probe owned APIs with the fixed bounded HTTP load profile")
     for kind, image in smoke.IMAGES.items():
         parser.add_argument(f"--{'webhook' if kind == 'web' else kind}-image", default=image)
     args = parser.parse_args(argv)
@@ -443,6 +444,9 @@ def main(argv=None):
         report["callback_origin"] = fixture.callback_origin
         fixture.stage = "controlled issuer and setup"
         report["checks"] = verify(fixture)
+        if args.load:
+            report["load"] = {}
+            smoke.verify_load(fixture, report["load"])
         report["proof"] = fixture.proof()
         report["source_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
         report["fixture_source_sha256"] = hashlib.sha256(Path(smoke.__file__).read_bytes()).hexdigest()
@@ -464,7 +468,8 @@ def main(argv=None):
             artifact.write_text(json.dumps(report, indent=2))
             print("RECEIPT: " + str(artifact), flush=True)
     # Keep this second acceptance sequential on the fixed-memory host.
-    smoke.main([*(["--scanners"] if args.scanners else []), *[option for kind in images for option in (f"--{'webhook' if kind == 'web' else kind}-image", images[kind])]])
+    smoke.main([*(["--scanners"] if args.scanners else []), *(["--load"] if args.load else []),
+                *[option for kind in images for option in (f"--{'webhook' if kind == 'web' else kind}-image", images[kind])]])
 
 
 if os.getenv("VERIFICATION_ROLE") in {"ingress", "generator", "sender"}:
