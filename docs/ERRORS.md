@@ -1,5 +1,23 @@
 # Verification tooling errors
 
+## 2026-10-21: Private inventory exceeded the Windows process argument limit
+
+- Symptom: after a successful full scanner smoke, the private preservation
+  collector failed before `docker inspect` launched: `WinError 206` at 524 full
+  container IDs. The 501-container baseline had succeeded.
+- Cause: the collector placed every 64-character ID in one process command line,
+  exceeding the Windows process argument limit. Docker and the resources were
+  healthy; no cleanup or runtime repair was needed.
+- Fix: copy the historical collector definitions into the current private helper
+  and inspect containers, volumes and networks in batches of at most 100 names.
+  Concatenate parsed JSON records in order; retain all original equality checks,
+  captured diagnostics and `docker ps --all --size=false`. Historical helpers,
+  resources and snapshots remain unchanged.
+- Detection: assert-based checks cover 0/1/100/101/524/526 IDs, exact order/count
+  and the batch bound. Actual 524-container smoke and 526-container restore
+  inventories passed, preserving all original resource records and protected
+  hashes. No committed product code or deployment configuration changed.
+
 ## 2026-10-21: Remaining verification CLIs echoed rejected arguments
 
 - Symptom: an invalid metrics role or unknown smoke/edge option appeared verbatim

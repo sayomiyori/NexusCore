@@ -172,6 +172,60 @@ data, user work and WSL settings were not changed. Docker Desktop itself was not
 restarted. This smoke does not exercise portable backup encryption/restore;
 the separate native Windows backup regressions remain part of the root suite.
 
+### Full scanner/load acceptance after CLI changes on 2026-10-21
+
+The full command above exited 0 on root tooling revision `7717d6d`, using
+existing cached immutable service images; no sibling image was rebuilt.
+Controlled project `nexus-smoke-6cd6fc0db5434fad86e48dc31c725d0b` completed before
+standalone project `nexus-smoke-7e76e5ba74c24ad79f3c656f073b64b6` started.
+Both receipts report `passed=true`, `owned_containers_stopped=true` and
+`external_calls_enabled=false`, with current driver/fixture/metrics/load hashes.
+
+All four controlled scanners survived PostgreSQL/broker faults and recovered
+after automatic process restart. Consumed notifications and a lost admission
+receipt still produced exactly one generation, usage, reply and canonical send.
+Tenant/deactivation and duplicate/conflict denials passed. The legacy scanner
+recovered two signed numeric-IP callbacks without duplicates. API restart
+without Redis retained event identity, shared quota, HMAC/API-key denials and
+live 200 / ready 503. Upload/Celery/PostgreSQL and login/JWT checks passed.
+Metrics retained controlled 200/503/404 and standalone 200/200/200 boundaries.
+
+| Fixture | API | Requests | p95 ms |
+| --- | --- | ---: | ---: |
+| Controlled AI | Auth health | 5,286 | 5.52 |
+| Controlled AI | WebHook readiness | 2,117 | 16.16 |
+| Controlled AI | Agent health | 4,076 | 6.88 |
+| Standalone | Auth health | 4,946 | 6.86 |
+| Standalone | WebHook readiness | 2,164 | 13.38 |
+| Standalone | Agent health | 3,975 | 6.92 |
+
+All probes used four clients for five seconds, HTTP 200 and a 500 ms p95 gate.
+These remain local health/readiness measurements, not production capacity.
+All 23 new containers stopped without OOM and with restart disabled: five
+scanners exited 143, the other 18 exited 0. Six new volumes were retained.
+
+Before/after snapshots preserved all 501 original containers, 263 volumes,
+networks/images, protected files and 65 completed scanner states. Main database
+rows/schema/sequences/metadata, uploads, nine definitions and deployment/WSL
+hashes matched. After smoke there were 524 containers, 269 volumes and 70 stopped
+scanners; only the original nine containers were running. Safe inventory kept
+the old dead worker and used `--size=false`. Its private collector needed
+[bounded inspect batches on Windows](ERRORS.md#2026-10-21-private-inventory-exceeded-the-windows-process-argument-limit).
+
+The exact preservation commands were:
+
+```powershell
+& ../WebHook_Manager/.venv/Scripts/python.exe -B .venv/post-tooling-smoke-20261021-inventory.py after nexus-smoke-6cd6fc0db5434fad86e48dc31c725d0b nexus-smoke-7e76e5ba74c24ad79f3c656f073b64b6
+& ../WebHook_Manager/.venv/Scripts/python.exe -B .venv/capture_stack_smoke_root.py .venv/post-tooling-smoke-20261021-main-before.json
+```
+
+Both passed after the collector correction. All 92 root regressions, Ruff and
+compilation passed; independent read-only/security review checked the receipts
+and snapshot equality. No application fix, Desktop restart, WSL change or real
+provider activation was needed. Private artifacts stay under ignored `.venv`.
+The subsequent [portable restore drill](portable-restore-2026-10-21.md) also
+preserved these completed fixtures.
+
 Each command owns a new `nexus-smoke-<uuid>` Compose project, private internal
 network and new PostgreSQL/Redis/uploads volumes. It reads no root `.env`, needs
 no external test database, publishes no host ports, pulls/builds no images and
