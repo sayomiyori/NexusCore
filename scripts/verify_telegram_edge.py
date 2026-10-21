@@ -44,8 +44,13 @@ HTTPServer(("0.0.0.0", 8000), Receiver).serve_forever()
 '''
 
 
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        super().error("Invalid arguments; details withheld")
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = Parser(description=__doc__)
     parser.add_argument("--python-image", required=True)
     args = parser.parse_args()
     project = "nexus-edge-check-" + uuid4().hex[:12]

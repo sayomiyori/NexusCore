@@ -59,6 +59,11 @@ class VerificationError(ValueError):
     """Static verification failures may be reported without captured credentials."""
 
 
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        super().error("Invalid arguments; details withheld")
+
+
 def require(condition, message):
     if not condition:
         raise VerificationError(message)
@@ -764,7 +769,7 @@ def verify_load(fixture, report):
 
 def main(argv=None):
     require(not sys.flags.optimize, "Optimized Python is not supported")
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = Parser(description=__doc__)
     parser.add_argument("--receiver", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--scanners", action="store_true", help="Verify the permanent legacy scanner with owned outages/restarts")
     parser.add_argument("--load", action="store_true", help="Probe owned APIs for 5 seconds each with 4 clients and p95 <= 500 ms")

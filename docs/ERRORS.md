@@ -1,5 +1,16 @@
 # Verification tooling errors
 
+## 2026-10-21: Remaining verification CLIs echoed rejected arguments
+
+- Symptom: an invalid metrics role or unknown smoke/edge option appeared verbatim
+  in stderr, despite safe diagnostics for later HTTP/Docker failures.
+- Cause: these four entrypoints still used the default argparse error formatter;
+  the load and backup tools already redacted syntax errors.
+- Fix: apply the existing static parser-error pattern, with the AI driver reusing
+  its existing smoke-module dependency. Valid arguments and runtime paths are unchanged.
+- Detection: twelve direct invalid-argument cases prove no HTTP/Docker/temp-dir
+  boundary is reached; real subprocess syntax/help checks withhold private values.
+
 ## 2026-10-19: Restart comparison rejected mixed empty DNS representations
 
 - Symptom: after a successful native restart, the resource comparator rejected

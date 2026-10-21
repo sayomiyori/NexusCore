@@ -418,7 +418,7 @@ def verify(fixture):
 
 def main(argv=None):
     smoke.require(not sys.flags.optimize, "Optimized Python is not supported")
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = smoke.Parser(description=__doc__)
     parser.add_argument("--receiver", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--scanners", action="store_true", help="Verify permanent recovery loops with owned outages/restarts")
     parser.add_argument("--load", action="store_true", help="Probe owned APIs with the fixed bounded HTTP load profile")

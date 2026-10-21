@@ -15,6 +15,11 @@ DENIALS = {"webhook_service": (503, "Global metrics disabled in platform mode"),
            "agent_service": (404, "Not found")}
 
 
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        super().error("Invalid arguments; details withheld")
+
+
 def verify(role: str, platform: bool = False) -> dict:
     if role not in FAMILIES or type(platform) is not bool:
         raise ValueError("Invalid metrics role/profile")
@@ -46,7 +51,7 @@ def verify(role: str, platform: bool = False) -> dict:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = Parser(description=__doc__)
     parser.add_argument("role", choices=FAMILIES)
     parser.add_argument("--platform", action="store_true")
     args = parser.parse_args(argv)

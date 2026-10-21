@@ -37,7 +37,12 @@ including malformed numeric values and unknown options. It never echoes rejected
 arguments. Runtime HTTP failures retain static diagnostics and exit 1; `--help`
 remains available. See [the local probe safety contract](../specs/local-load-safety.md).
 
-The probe streams raw response payloads without buffering or decompressing the
+The metrics, standalone/AI smoke and Telegram-edge CLIs use the same static
+argument-error policy; rejected values and unknown options are withheld before
+any HTTP/Docker/fixture action. Their valid arguments and help remain unchanged.
+See [the verification CLI privacy contract](../specs/verification-cli-privacy.md).
+
+The load probe streams raw response payloads without buffering or decompressing the
 whole body. Each response must be at most 64 KiB, regardless of Content-Length;
 oversized fixed-length or chunked responses fail without a success report.
 Latency includes the entire accepted response. This bounds response payload,
