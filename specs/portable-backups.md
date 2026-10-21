@@ -19,6 +19,16 @@ Output device handles such as Windows `NUL` are rejected before writing bytes.
 Inputs must be regular files; plaintext is capped at 16 MiB, ciphertext at 24 MiB.
 Fernet operates in memory; large production archives need a streaming backup tool.
 
+`verify SOURCE --key-file PATH` authenticates an encrypted artifact and checks
+the same decrypted-size limit without creating any output file. It accepts no
+`--output` argument. Success prints only `PASS: backup artifact authenticated`;
+wrong keys, tampering, invalid inputs and read failures retain static exit-1
+diagnostics, and syntax errors retain exit 2. Reuse the decrypt path, including
+regular/no-follow reads and existing key/input/size validation. Decrypted bytes
+exist in process memory; this is not secure memory erasure or a PostgreSQL
+restore check. Test binary/empty artifacts, failures, no writer calls, unchanged
+input/key/directory contents and rejection of an output option before reading.
+
 Input no-follow enforcement must apply when the file is opened, including a
 final-component link substituted after the preliminary path check. On Windows,
 open the reparse point itself and reject its handle attributes before reading

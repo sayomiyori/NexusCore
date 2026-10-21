@@ -12,6 +12,7 @@ POSIX output creation requests mode 0600. Parent directories must be trusted.
 ```powershell
 .venv/checks/Scripts/python.exe scripts/backup_artifact.py keygen --output .venv/recovery.backup-key
 .venv/checks/Scripts/python.exe scripts/backup_artifact.py encrypt .venv/synthetic.dump --key-file .venv/recovery.backup-key --output .venv/synthetic.dump.fernet
+.venv/checks/Scripts/python.exe scripts/backup_artifact.py verify .venv/synthetic.dump.fernet --key-file .venv/recovery.backup-key
 .venv/checks/Scripts/python.exe scripts/backup_artifact.py decrypt .venv/synthetic.dump.fernet --key-file .venv/recovery.backup-key --output .venv/restored.dump
 ```
 
@@ -27,7 +28,14 @@ and reject device handles. On Windows, readers may share the file, but concurren
 writers/deletion are denied until the read finishes. Use stable input files and
 trusted parent directories; ordinary hard links are not rejected.
 
-The tool exits 0 only after writing/flushing the complete new file. Authentication,
+`verify` authenticates the encrypted artifact and enforces the decrypted-size
+limit without writing plaintext or creating any file. It accepts no `--output`
+option and prints only `PASS: backup artifact authenticated`. It reads the same
+key/input files as decryption, so wrong keys, tampering and unsafe files fail.
+Decrypted bytes still exist in process memory; this is not secure memory erasure,
+database-format validation or proof that PostgreSQL can restore the artifact.
+
+For writing commands, the tool exits 0 only after writing/flushing the complete new file. Authentication,
 size and I/O failures exit 1 with static diagnostics; CLI syntax errors exit 2.
 Wrong keys or corruption create no plaintext. An I/O failure can leave a partial
 new file; treat exit 1 as unusable and inspect only that owned artifact. No file

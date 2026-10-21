@@ -41,7 +41,9 @@ def write_new(path: Path, data: bytes) -> None:
         os.fsync(destination.fileno())
 
 
-def transform(source: Path, output: Path, key_file: Path, *, decrypt: bool) -> None:
+def transform(source: Path, output: Path | None, key_file: Path, *, decrypt: bool) -> None:
+    if output is None and not decrypt:
+        raise ValueError("Encryption requires an output file")
     key = read_file(key_file, 44)
     if len(key) != 44:
         raise ValueError("Invalid key file")
@@ -50,7 +52,8 @@ def transform(source: Path, output: Path, key_file: Path, *, decrypt: bool) -> N
     result = cipher.decrypt(data) if decrypt else cipher.encrypt(data)
     if decrypt and len(result) > MAX_PLAINTEXT:
         raise ValueError("Plaintext exceeds size limit")
-    write_new(output, result)
+    if output is not None:
+        write_new(output, result)
 
 
 def main(argv=None) -> int:
@@ -58,21 +61,24 @@ def main(argv=None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     generator = commands.add_parser("keygen")
     generator.add_argument("--output", type=Path, required=True)
-    for name in ("encrypt", "decrypt"):
+    for name in ("encrypt", "decrypt", "verify"):
         command = commands.add_parser(name)
         command.add_argument("source", type=Path)
         command.add_argument("--key-file", type=Path, required=True)
-        command.add_argument("--output", type=Path, required=True)
+        if name == "verify":
+            command.set_defaults(output=None)
+        else:
+            command.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "keygen":
             write_new(args.output, Fernet.generate_key())
         else:
-            transform(args.source, args.output, args.key_file, decrypt=args.command == "decrypt")
+            transform(args.source, args.output, args.key_file, decrypt=args.command != "encrypt")
     except (OSError, ValueError, InvalidToken):
         print("Backup operation failed; input, key and filesystem details withheld", file=sys.stderr)
         return 1
-    print("PASS: new backup artifact created")
+    print("PASS: backup artifact authenticated" if args.command == "verify" else "PASS: new backup artifact created")
     return 0
 
 

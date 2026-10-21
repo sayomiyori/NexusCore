@@ -67,6 +67,60 @@ class BackupArtifactTests(unittest.TestCase):
                 for private in (str(self.root).encode(), self.key.read_bytes(), b"synthetic private content", b"Traceback"):
                     self.assertNotIn(private, result.stderr)
 
+    def test_verify_authenticates_binary_and_empty_tokens_without_writes(self):
+        for data in (self.source.read_bytes(), b''):
+            with self.subTest(empty=not data):
+                self.output.write_bytes(Fernet(self.key.read_bytes()).encrypt(data))
+                before = {path.name: path.read_bytes() for path in self.root.iterdir()}
+                result = self.cli('verify', self.output, '--key-file', self.key)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.splitlines(), [b'PASS: backup artifact authenticated'])
+                self.assertEqual(result.stderr, b'')
+                with patch.object(backup, 'write_new') as writer, contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(backup.main(['verify', str(self.output), '--key-file', str(self.key)]), 0)
+                writer.assert_not_called()
+                self.assertEqual({path.name: path.read_bytes() for path in self.root.iterdir()}, before)
+
+    def test_verify_rejects_wrong_key_tamper_invalid_and_missing_inputs_without_disclosure(self):
+        token = Fernet(self.key.read_bytes()).encrypt(self.source.read_bytes())
+        bad = bytearray(token)
+        bad[len(bad) // 2] ^= 1
+        wrong = self.root / 'synthetic-private-wrong-key'
+        wrong.write_bytes(Fernet.generate_key())
+        for payload, key in ((token, wrong), (bytes(bad), self.key), (token[:-10], self.key),
+                             (b'bad token', self.key), (token, self.root / 'synthetic-private-missing-key')):
+            with self.subTest(payload_bytes=len(payload), key=key.name):
+                self.output.write_bytes(payload)
+                before = {path.name: path.read_bytes() for path in self.root.iterdir()}
+                result = self.cli('verify', self.output, '--key-file', key)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, b'')
+                self.assertEqual(result.stderr.splitlines(), [b'Backup operation failed; input, key and filesystem details withheld'])
+                self.assertEqual({path.name: path.read_bytes() for path in self.root.iterdir()}, before)
+        result = self.cli('verify', self.root / 'synthetic-private-missing-token', '--key-file', self.key)
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn(b'synthetic-private', result.stderr)
+
+    def test_verify_checks_size_limits_and_encrypt_still_requires_output(self):
+        with patch.object(backup, 'MAX_PLAINTEXT', 4), patch.object(backup, 'MAX_CIPHERTEXT', 128), \
+                patch.object(backup, 'write_new') as writer:
+            for payload in (Fernet(self.key.read_bytes()).encrypt(b'12345'), b'x' * 129):
+                self.output.write_bytes(payload)
+                with self.assertRaises(ValueError):
+                    backup.transform(self.output, None, self.key, decrypt=True)
+            with self.assertRaises(ValueError):
+                backup.transform(self.source, None, self.key, decrypt=False)
+            writer.assert_not_called()
+
+    def test_verify_output_option_is_rejected_before_any_file_access(self):
+        with patch.object(backup, 'read_file') as reader, contextlib.redirect_stderr(io.StringIO()) as errors, \
+                self.assertRaises(SystemExit) as result:
+            backup.main(['verify', 'synthetic-private-token', '--key-file', 'synthetic-private-key',
+                         '--output', 'synthetic-private-output'])
+        self.assertEqual(result.exception.code, 2)
+        reader.assert_not_called()
+        self.assertNotIn('synthetic-private', errors.getvalue())
+
     def test_existing_outputs_and_same_source_are_preserved(self):
         for destination in (self.source, self.key, self.root, self.root / "occupied"):
             if destination.name == "occupied":
