@@ -1,12 +1,13 @@
 # NexusCore shared observability stream
 
-`scripts/relay_observability.py` forwards tenant-authorized AgentHub AI job
-observations to existing EventPipe and PipeWatch APIs. No sibling imports,
+`scripts/relay_observability.py` forwards tenant-authorized AuthFortress tenant,
+WebHook bot and AgentHub AI job observations to existing EventPipe and PipeWatch
+APIs. No sibling imports,
 service changes, new dependencies or default root activation are required.
 See [the contract](../specs/observability-flow.md).
 
 ```text
-AgentHub authorized job metadata
+AuthFortress tenants / WebHook bots / AgentHub jobs
                |
      NexusCore local durable relay
                |
@@ -20,7 +21,7 @@ AgentHub authorized job metadata
 ## Configuration and operation
 
 Use only a separately provisioned isolated stack until a deployment is explicitly
-approved. AgentHub needs `PLATFORM_READ_ENABLED=true`, valid issuer/bot-context
+approved. If selected, AgentHub needs `PLATFORM_READ_ENABLED=true`, valid issuer/bot-context
 configuration and its existing platform schema. EventPipe ingest/transform/query
 need their platform modes and checked schema. PipeWatch needs
 `PLATFORM_AUTH_ENABLED=true`, the issuer URL and persistent Redis with AOF,
@@ -65,9 +66,54 @@ are rejected. Each raw response is capped at 256 KiB; socket timeout is five
 seconds, connect timeout two. This is an inactivity timeout, not an absolute
 whole-sweep deadline. Use private trusted endpoints; this is not a URL fetch API.
 
+### Optional identity and registry sources
+
+The AI-only example above remains unchanged and can reopen its existing state.
+At least one source origin must be supplied; `--agent-origin` is now optional.
+To select all three sources, add `--auth-origin http://127.0.0.1:38080` and
+`--webhook-origin http://127.0.0.1:38001`, using separately inspected isolated
+origins. For just identity/registry observations, omit `--agent-origin`.
+Tenant/bot arguments remain required even in auth-only mode; auth envelopes have
+null bot scope and do not imply a relationship to the selected bot.
+
+Changing the selected source origins changes the state binding. Start this new
+source configuration with a deliberately selected new state path, for example
+`.venv/identity-bots.sqlite`; do not overwrite/reset or modify existing state.
+This can replay observations from sources included in both configurations, so
+do not concurrently enable overlapping relays without accounting for that fact.
+
+AuthFortress uses `GET /api/v1/tenants/{tenant_id}`. Only canonical tenant UUID,
+creation time and owner/member role are consumed; tenant name is discarded.
+`auth.tenant.observed` carries `tenant_created_at` and `observed_role`, with the
+tenant UUID as correlation reference and first local observation time as event
+time. Stable identity excludes polling time and selected bot; repeated reads
+retain the original saved envelope. This is a snapshot of the caller's observed
+tenant access, not evidence of a login, logout or timed membership change.
+
+WebHook uses `GET /api/v1/tenants/{tenant_id}/bots/{bot_id}` with
+`PLATFORM_BOTS_ENABLED=true` and existing online identity configuration. Telegram
+intake/reply flags need not be enabled. `webhook.bot.observed` retains only strict
+`is_active` and the known `webhook_status`, with matching canonical tenant/bot,
+UTC source update time and bot UUID as correlation reference. Names, username,
+numeric Telegram identity, credentials and webhook URL are discarded.
+
+Each configured source independently completes a fresh authorized read/scan.
+Only its event types may then drain pending rows. One denied/unavailable source
+does not block independently authorized types: an inactive bot can deny AI reads
+while its registry deactivation snapshot is delivered. Partial failures add
+`source_errors` to the cumulative counts and exit 1; all-source failure prints
+only the existing static diagnostic and makes no sink calls. The interval loop
+repeats only fully successful sweeps. No producer failure is silently hidden.
+
+Both sinks use the actual envelope type as event_type/fixed message. EventPipe
+scalar metadata omits bot_id for auth observations; PipeWatch stores the same
+full envelope. Webhook failed/unknown states get error severity. Accepted/unknown
+deliveries keep the same no-automatic-resend behavior. Existing SQLite schema
+and original AI event IDs are unchanged.
+
 The SQLite file belongs to this relay only. Do not select a service database,
 edit its rows, share it between different destinations/scopes or delete it to
-clear an error. State binds tenant, bot and all three origins; changing any
+clear an error. State binds tenant, bot and all configured origins; changing any
 requires a deliberate new relay identity and may replay old observations.
 Trusted parent directories and local filesystem are required; final-component
 links/nonregular files are rejected. State uses local SQLite locking/transactions
@@ -101,7 +147,7 @@ becomes `unknown` in a committed transaction before its HTTP call. Only a valid
 accepted receipt changes it to `accepted`. Accepted/unknown rows are never
 automatically resent. The other sink can still accept its copy after one fails.
 Pending rows survive interrupted collection and resume only after a fresh
-successful source authorization, even if that job no longer appears in a scan.
+successful authorization/scan of their own source, even if that job no longer appears in a scan.
 
 If `unknown` is nonzero, inspect the destination through its authorized query
 API using the deterministic envelope UUID (`relay_event_id` / `trace_id`). A
@@ -128,8 +174,14 @@ reopen, pending recovery, sink isolation, uncertain receipts, source denial,
 state binding and credential-safe CLI failures. The
 [2026-10-22 Docker acceptance](observability-acceptance-2026-10-22.md) records the
 actual issuer/source, both storage pipelines and exact preservation results.
+The [identity/bot extension acceptance](observability-identity-bots-2026-10-22.md)
+adds the actual three-source drill, inactive bot/source failures and preservation
+of the existing 580-container baseline.
 
-This first stream does not emit all AuthFortress/WebHook lifecycle events, replace
-business delivery, configure Prometheus/Grafana or add a dashboard. Live provider
+The identity/registry extension follows the
+[source contract](../specs/observability-identity-bots.md). These snapshots do not
+export global AuthFortress admin audit, legacy API-key events, ingress/delivery
+payloads or every intermediate lifecycle change. They do not replace business
+delivery, configure Prometheus/Grafana or add a dashboard. Live provider
 quality, production deployment, service credentials/refresh and sustained load
 remain separate work. Default root flags and existing data are unchanged.

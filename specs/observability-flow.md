@@ -1,5 +1,9 @@
 # NexusCore shared observability flow v1
 
+The implemented [identity/bot source extension](observability-identity-bots.md)
+adds optional AuthFortress/WebHook sources and per-source authorization gating.
+The original AI-only contract and identity/state format below remain compatible.
+
 Connect the existing tenant-authorized AgentHub job metadata API to both
 EventPipe and PipeWatch, without changing sibling services or existing runtime.
 This first stream reports observed AI job states, not private messages, answers,

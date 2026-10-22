@@ -1,4 +1,4 @@
-"""Relay tenant-authorized job observations to EventPipe and PipeWatch; opt-in only."""
+"""Relay tenant-authorized metadata observations to EventPipe and PipeWatch; opt-in only."""
 
 import argparse
 import ipaddress
@@ -9,14 +9,14 @@ import stat
 import sys
 import time
 from contextlib import closing
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, StrictBool
 
 if __package__:
     from .local_files import new_descriptor
@@ -26,6 +26,7 @@ else:
 MAX_BODY = 256 * 1024
 SINKS = ("eventpipe", "pipewatch")
 EVENT_TYPE = "ai.job.observed"
+SOURCE_TYPES = {"agent": EVENT_TYPE, "auth": "auth.tenant.observed", "webhook": "webhook.bot.observed"}
 
 
 class Parser(argparse.ArgumentParser):
@@ -44,6 +45,20 @@ class Job(BaseModel):
 class Page(BaseModel):
     items: list[Job] = Field(max_length=100)
     next_cursor: UUID | None
+
+
+class Tenant(BaseModel):
+    id: UUID
+    role: Literal["owner", "member"]
+    created_at: AwareDatetime
+
+
+class Bot(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    is_active: StrictBool
+    webhook_status: Literal["not_configured", "configuring", "configured", "failed", "unknown"]
+    updated_at: AwareDatetime
 
 
 def origin(value):
@@ -87,11 +102,15 @@ def open_state(path, binding):
         raise
 
 
-def envelope(job, tenant_id, bot_id):
+def utc_timestamp(value):
     try:
-        occurred = job.updated_at.astimezone(UTC).isoformat()
+        return value.astimezone(UTC).isoformat()
     except OverflowError:
         raise ValueError("Timestamp exceeds UTC range") from None
+
+
+def envelope(job, tenant_id, bot_id):
+    occurred = utc_timestamp(job.updated_at)
     identifier = str(uuid5(NAMESPACE_URL, json.dumps([
         EVENT_TYPE, str(tenant_id), str(bot_id), str(job.id), str(job.event_id),
         job.state, job.attempts, occurred,
@@ -101,6 +120,29 @@ def envelope(job, tenant_id, bot_id):
             "correlation_id": str(job.event_id), "idempotency_key": identifier,
             "payload": {"job_id": str(job.id), "ingress_event_id": str(job.event_id),
                         "state": job.state, "attempts": job.attempts}}
+
+
+def metadata_envelope(role, item, tenant_id, bot_id):
+    kind = SOURCE_TYPES[role]
+    if role == "auth":
+        if item.id != tenant_id:
+            raise ValueError("Canonical tenant mismatch")
+        scope_bot = None
+        payload = {"tenant_created_at": utc_timestamp(item.created_at), "observed_role": item.role}
+        occurred = utc_timestamp(datetime.now(UTC))
+        identity_time = None
+    else:
+        if item.id != bot_id or item.tenant_id != tenant_id:
+            raise ValueError("Canonical bot scope mismatch")
+        scope_bot = str(bot_id)
+        payload = {"is_active": item.is_active, "webhook_status": item.webhook_status}
+        occurred = identity_time = utc_timestamp(item.updated_at)
+    identifier = str(uuid5(NAMESPACE_URL, json.dumps([
+        kind, str(tenant_id), scope_bot, identity_time, payload,
+    ], sort_keys=True, separators=(",", ":"))))
+    return {"event_id": identifier, "event_type": kind, "schema_version": 1,
+            "occurred_at": occurred, "tenant_id": str(tenant_id), "bot_id": scope_bot,
+            "correlation_id": str(item.id), "idempotency_key": identifier, "payload": payload}
 
 
 class Relay:
@@ -127,7 +169,13 @@ class Relay:
             except RecursionError:
                 raise ValueError("Nested response exceeds parser limit") from None
 
-    def collect(self):
+    def store(self, event):
+        encoded = json.dumps(event, sort_keys=True, separators=(",", ":"))
+        self.db.execute("INSERT OR IGNORE INTO relay_events VALUES (?,?)", (event["event_id"], encoded))
+        for sink in SINKS:
+            self.db.execute("INSERT OR IGNORE INTO relay_deliveries VALUES (?,?,'pending',NULL)", (event["event_id"], sink))
+
+    def collect_jobs(self):
         cursor = None
         route = f"/api/v1/tenants/{self.tenant_id}/bots/{self.bot_id}/ai/jobs?limit=100"
         for _ in range(100):
@@ -140,41 +188,64 @@ class Relay:
                 raise ValueError("Unordered page")
             with self.db:
                 for job in page.items:
-                    event = envelope(job, self.tenant_id, self.bot_id)
-                    encoded = json.dumps(event, sort_keys=True, separators=(",", ":"))
-                    self.db.execute("INSERT OR IGNORE INTO relay_events VALUES (?,?)", (event["event_id"], encoded))
-                    for sink in SINKS:
-                        self.db.execute("INSERT OR IGNORE INTO relay_deliveries VALUES (?,?,'pending',NULL)",
-                                        (event["event_id"], sink))
+                    self.store(envelope(job, self.tenant_id, self.bot_id))
             if page.next_cursor is None:
                 return
             cursor = page.next_cursor
         raise ValueError("Sweep page limit exceeded")
 
+    def collect(self):
+        allowed = set()
+        failures = 0
+        for role, kind in SOURCE_TYPES.items():
+            if role not in self.origins:
+                continue
+            try:
+                if role == "agent":
+                    self.collect_jobs()
+                else:
+                    route = f"/api/v1/tenants/{self.tenant_id}"
+                    if role == "webhook":
+                        route += f"/bots/{self.bot_id}"
+                    model = Tenant if role == "auth" else Bot
+                    item = model.model_validate(self.request("GET", role, route))
+                    event = metadata_envelope(role, item, self.tenant_id, self.bot_id)
+                    with self.db:
+                        self.store(event)
+                allowed.add(kind)
+            except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+                failures += 1
+        if not allowed:
+            raise ValueError("No source completed an authorized scan")
+        return allowed, failures
+
     def sweep(self):
-        # A fresh successful source authorization precedes every pending drain.
-        self.collect()
+        # Gate each type on its own fresh source authorization, including saved pending rows.
+        allowed, failures = self.collect()
         pending = self.db.execute("SELECT event_id,sink FROM relay_deliveries WHERE state='pending'").fetchall()
         for identifier, sink in pending:
+            event = json.loads(self.db.execute("SELECT envelope FROM relay_events WHERE id=?", (identifier,)).fetchone()[0])
+            if event["event_type"] not in allowed:
+                continue
             with self.db:
                 claimed = self.db.execute("UPDATE relay_deliveries SET state='unknown' "
                                           "WHERE event_id=? AND sink=? AND state='pending'", (identifier, sink)).rowcount
             if not claimed:
                 continue
-            event = json.loads(self.db.execute("SELECT envelope FROM relay_events WHERE id=?", (identifier,)).fetchone()[0])
             try:
                 if sink == "eventpipe":
                     receipt = self.request("POST", sink, "/api/v1/events", {
-                        "source": "nexuscore", "event_type": EVENT_TYPE, "payload": event,
-                        "metadata": {"relay_event_id": identifier, "bot_id": str(self.bot_id)},
+                        "source": "nexuscore", "event_type": event["event_type"], "payload": event,
+                        "metadata": {"relay_event_id": identifier, **({"bot_id": event["bot_id"]} if event["bot_id"] else {})},
                     })
                     if receipt.get("status") != "accepted":
                         raise ValueError("Invalid receipt")
                     remote_id = str(UUID(receipt["event_id"]))
                 else:
                     receipt = self.request("POST", sink, "/api/v1/logs", {
-                        "service": "nexuscore", "level": "error" if event["payload"]["state"] in {"failed", "unknown"} else "info",
-                        "message": EVENT_TYPE, "trace_id": identifier, "metadata": event,
+                        "service": "nexuscore", "level": "error" if any(
+                            event["payload"].get(key) in {"failed", "unknown"} for key in ("state", "webhook_status")) else "info",
+                        "message": event["event_type"], "trace_id": identifier, "metadata": event,
                     })
                     if receipt != {"status": "accepted", "count": 1} or type(receipt["count"]) is not int:
                         raise ValueError("Invalid receipt")
@@ -186,20 +257,26 @@ class Relay:
                 # Either sink may have committed before losing its response; never resend automatically.
                 continue
         counts = dict(self.db.execute("SELECT state,count(*) FROM relay_deliveries GROUP BY state").fetchall())
-        return {state: counts.get(state, 0) for state in ("pending", "accepted", "unknown")}
+        return {**{state: counts.get(state, 0) for state in ("pending", "accepted", "unknown")},
+                **({"source_errors": failures} if failures else {})}
 
 
 def main(argv=None):
     parser = Parser(description=__doc__)
-    for role in ("agent", *SINKS):
+    for role in SINKS:
         parser.add_argument(f"--{role}-origin", required=True)
+    for role in SOURCE_TYPES:
+        parser.add_argument(f"--{role}-origin")
     parser.add_argument("--tenant-id", required=True)
     parser.add_argument("--bot-id", required=True)
     parser.add_argument("--state", required=True, type=Path)
     parser.add_argument("--interval", type=int, default=0)
     args = parser.parse_args(argv)
     try:
-        origins = {role: origin(getattr(args, role + "_origin")) for role in ("agent", *SINKS)}
+        origins = {role: origin(getattr(args, role + "_origin")) for role in (*SOURCE_TYPES, *SINKS)
+                   if getattr(args, role + "_origin") is not None}
+        if not set(SOURCE_TYPES) & origins.keys():
+            raise ValueError("At least one source is required")
         if args.interval != 0 and not 5 <= args.interval <= 3600:
             raise ValueError("Invalid relay configuration")
         tenant_id, bot_id = UUID(args.tenant_id), UUID(args.bot_id)
@@ -213,7 +290,7 @@ def main(argv=None):
             while True:
                 counts = relay.sweep()
                 print(json.dumps(counts), flush=True)
-                if counts["pending"] or counts["unknown"]:
+                if counts["pending"] or counts["unknown"] or counts.get("source_errors"):
                     return 1
                 if not args.interval:
                     return 0
