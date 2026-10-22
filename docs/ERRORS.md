@@ -1,5 +1,21 @@
 # Verification tooling errors
 
+## 2026-10-22: Cached EventPipe dual CLI did not finish on HTTP shutdown
+
+- Symptom: the new isolated observability fixture delivered and queried events,
+  but its cached EventPipe ingest container required a forced stop (exit 137,
+  OOM false). This attempt was retained as failed, not accepted.
+- Cause: the image's module CLI awaited both Uvicorn and gRPC termination;
+  HTTP shutdown left the gRPC wait alive before its `finally` cleanup.
+- Integration correction: launch the existing ASGI application with
+  `python -m uvicorn ingest_service.app.main:app --host 0.0.0.0 --port 8000`.
+  Its existing lifespan owns Kafka/gRPC startup and shutdown. No dirty sibling
+  source, image or existing deployment was modified.
+- Detection: the final new UUID fixture stopped/restarted ingest during the
+  partial-failure probe and stopped all services afterwards. Ingest and all
+  Python applications exited 0 without OOM; stock Kafka/ZooKeeper exited 143
+  under explicit SIGTERM. The standalone default CLI itself remains unchanged.
+
 ## 2026-10-21: Private inventory exceeded the Windows process argument limit
 
 - Symptom: after a successful full scanner smoke, the private preservation
