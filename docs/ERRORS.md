@@ -1,5 +1,35 @@
 # Verification tooling errors
 
+## 2026-10-23: Isolated SeaweedFS exhausted its single internal volume slot
+
+- Symptom: the first private dashboard fixture's EventPipe transform exhausted
+  bounded S3 retries and exited 1 with `transform infrastructure unavailable`.
+  This attempt was retained as failed, not accepted as dashboard evidence.
+- Cause: the reused fixture specified `-volume.max=1`. SeaweedFS allocated its
+  only slot to the default collection; the separate `raw-events`
+  collection then reported `No writable volumes and no free volumes left`.
+  No OOM, shared deployment mutation or application validation failure was found.
+- Fixture correction: use four internal SeaweedFS slots in a fresh UUID project
+  and prove bucket create/write/read through the existing S3 client before
+  starting transform. These are internal SeaweedFS slots inside one new Docker
+  volume, not changes to any existing Docker volume. No cleanup is required.
+- Detection: the original failed receipt/logs remain in the ignored private
+  fixture directory. Final acceptance requires the explicit S3 readiness probe,
+  three stored observation types and clean transform shutdown.
+
+## 2026-10-23: Overview could present mismatched receiver types as empty
+
+- Symptom: an unshipped dashboard draft treated a known outer event type with an
+  unknown inner type as a successful empty receiver response.
+- Cause: outer/inner type equality was checked only after the inner observation
+  parser returned a supported event. Unknown inner types skipped that guard.
+- Fix: compare the outer marker and inner type unconditionally before excluding
+  unsupported types. A mismatch makes that receiver unavailable; the independent
+  receiver can still provide its safe observations.
+- Detection: `known outer markers cannot hide invalid inner types as successful
+  empty reads` exercises both EventPipe and PipeWatch. Independent review's
+  original HTTP reproduction now returns both sources unavailable.
+
 ## 2026-10-23: Reconciliation could miss an ID claimed under another outer type
 
 - Symptom: the first unshipped reconciliation draft filtered EventPipe summaries

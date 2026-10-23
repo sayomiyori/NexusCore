@@ -1,0 +1,13 @@
+{
+  "files": {
+    "includes": [
+      "**",
+      "!!**/.next",
+      "!!**/node_modules",
+      "!next-env.d.ts",
+      "!package-lock.json"
+    ]
+  },
+  "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2 },
+  "linter": { "enabled": true, "rules": { "preset": "recommended" } }
+}

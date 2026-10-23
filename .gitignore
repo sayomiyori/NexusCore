@@ -11,6 +11,12 @@ __pycache__/
 *.backup-key
 *.fernet
 
+# Optional dashboard build artifacts
+/dashboard/node_modules/
+/dashboard/.next/
+/dashboard/tsconfig.tsbuildinfo
+/dashboard/next-env.d.ts
+
 # Local AI assistant working notes and verification artifacts
 AGENTS.md
 PROJECT-MAP.md
