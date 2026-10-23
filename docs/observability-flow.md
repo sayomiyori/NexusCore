@@ -152,17 +152,85 @@ successful authorization/scan of their own source, even if that job no longer ap
 If `unknown` is nonzero, inspect the destination through its authorized query
 API using the deterministic envelope UUID (`relay_event_id` / `trace_id`). A
 matching record can establish acceptance; an absent query result alone cannot
-exclude delayed Kafka/Redis processing. There is no automatic retry/reset command:
-reconciliation needs a separate reviewed operator procedure. Do not manually
-rewrite state or start with an empty file to make the count disappear. Neither
+exclude delayed Kafka/Redis processing. Use the explicit read-only reconciliation
+report below; there is no automatic retry/reset or state-update command. Do not
+manually rewrite state or start with an empty file to make the count disappear. Neither
 sink accepts a caller-provided idempotency key, so this cannot guarantee
 exactly-once storage. PipeWatch's own ambiguous ClickHouse replay remains at least
 once even after the relay received an acceptance receipt.
+
+## Read-only unknown reconciliation
+
+Use the **same** tenant/bot, selected source/sink origins and existing state path
+as the original relay. Add `--reconcile --eventpipe-query-origin ORIGIN`, selecting
+the authorized query API for that bound EventPipe ingest deployment. Query and
+ingest may use different ports. That explicit query origin is validated like
+other private origins; it does not change the existing state identity. Pairing
+it with the correct deployment remains the operator's responsibility.
+
+```powershell
+& ../WebHook_Manager/.venv/Scripts/python.exe -B scripts/relay_observability.py `
+  --agent-origin http://127.0.0.1:38014 `
+  --eventpipe-origin http://127.0.0.1:38013 `
+  --pipewatch-origin http://127.0.0.1:38084 `
+  --tenant-id 00000000-0000-4000-8000-000000000001 `
+  --bot-id 00000000-0000-4000-8000-000000000002 `
+  --state .venv/observability.sqlite `
+  --reconcile --eventpipe-query-origin http://127.0.0.1:38015
+```
+
+Keep any original `--auth-origin`/`--webhook-origin` too. The token still comes
+only from `NEXUS_EVENTS_TOKEN`; the current receiver tenant-read APIs enforce
+authorization. No source API is called, so an inactive bot does not hide its
+historical evidence. Query origin without reconcile, missing query origin and
+`--interval` with reconcile fail before HTTP.
+
+The mode reads existing rollback-journal SQLite through `mode=ro`, validates
+its binding and reconstructs selected envelopes with the original ID/schema/
+scope builders. Missing/nonregular/link paths and WAL format fail closed before
+SQLite opens (WAL readers can write shared-memory sidecars). It creates no new
+state, migration or receipt and changes no accepted/pending/unknown rows. Use
+trusted local parent directories and the relay's default journal format; do not
+change journal mode on deployment data to bypass an error.
+
+Only `unknown` rows are selected, at most 100 per report. Output contains five
+integer delivery counts, without tokens, identifiers, payloads or raw errors:
+
+| Count | Evidence |
+| --- | --- |
+| `confirmed` | One observed stored record has the complete exact envelope and receiver mapping |
+| `unresolved` | No matching record was observed; this does not prove non-delivery |
+| `duplicates` | More than one matching stored record was observed |
+| `conflicts` | A record claims the ID but differs in complete payload or mapping; takes precedence over duplicate/confirmed |
+| `errors` | Receiver denial/outage, invalid response or incomplete bounded scan prevented a conclusion |
+
+Exit 0 means every selected unknown is confirmed, or there were none. Any other
+category exits 1. Successful reporting leaves unknown rows unknown; repeating
+it or the normal relay cannot resend them. Confirmation establishes observed
+presence, not exactly-once delivery, uniqueness under concurrent writes or a
+permission to alter state. A persistence/reset/resend workflow is not provided.
+
+EventPipe lists `source=nexuscore` in pages of 100, reads every full detail and
+compares full envelope plus source/type/relay metadata, never preview text.
+The scan is shared by all selected EventPipe checks and must finish within ten
+pages/1,000 summaries; a full last page, repeated storage UUID or invalid detail
+makes those checks errors. List offsets can move during traffic; rerun after
+processing settles. The worst case is ten list and 1,000 detail GETs; socket
+timeouts are not an overall deadline. No configurable unlimited scan is added.
+
+PipeWatch queries each unknown's canonical `trace_id`, `service=nexuscore`, page 1
+and size 2, validates count/page consistency and full metadata. Count/trace alone
+cannot confirm delivery. Errors in one receiver do not suppress checks of the
+other. This mode never POSTs, retries delivery or removes evidence. See the
+[reconciliation contract](../specs/observability-reconciliation.md).
+The [2026-10-23 acceptance](observability-reconciliation-2026-10-23.md) records
+actual lost receipts, GET-only reports, storage/state preservation and failures.
 
 ## Local checks
 
 ```powershell
 & .venv/tooling-checks/Scripts/python.exe -B -m unittest discover -s tests -p test_verify_observability.py -q
+& .venv/tooling-checks/Scripts/python.exe -B -m unittest discover -s tests -p test_verify_observability_reconciliation.py -q
 & .venv/tooling-checks/Scripts/python.exe -B -m unittest discover -s tests -p 'test_verify*.py' -q
 & .venv/tooling-checks/Scripts/python.exe -B -m ruff check --no-cache scripts tests
 & .venv/tooling-checks/Scripts/python.exe -m compileall -q scripts tests

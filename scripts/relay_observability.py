@@ -75,13 +75,21 @@ def origin(value):
     return f"{parsed.scheme}://{address}:{parsed.port or (443 if parsed.scheme == 'https' else 80)}"
 
 
-def open_state(path, binding):
+def open_state(path, binding, *, read_only=False):
     if path.is_symlink() or path.is_junction() or (path.exists() and not stat.S_ISREG(path.stat().st_mode)):
         raise ValueError("Invalid state file")
     fresh = not path.exists()
+    if read_only and fresh:
+        raise ValueError("Existing state required")
+    if read_only:
+        # WAL readers may create/write shared-memory files even with mode=ro.
+        with path.open("rb") as source:
+            if source.read(20)[18:20] != b"\x01\x01":
+                raise ValueError("Rollback-journal state required")
     if fresh:
         os.close(new_descriptor(path))
-    db = sqlite3.connect(path, timeout=5)
+    db = (sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True, timeout=5)
+          if read_only else sqlite3.connect(path, timeout=5))
     try:
         if fresh:
             db.executescript("""
@@ -143,6 +151,42 @@ def metadata_envelope(role, item, tenant_id, bot_id):
     return {"event_id": identifier, "event_type": kind, "schema_version": 1,
             "occurred_at": occurred, "tenant_id": str(tenant_id), "bot_id": scope_bot,
             "correlation_id": str(item.id), "idempotency_key": identifier, "payload": payload}
+
+
+def same_event(left, right):
+    try:
+        return json.dumps(left, sort_keys=True, allow_nan=False) == json.dumps(right, sort_keys=True, allow_nan=False)
+    except RecursionError:
+        raise ValueError("Nested event exceeds parser limit") from None
+
+
+def saved_event(identifier, raw, tenant_id, bot_id):
+    if len(raw) > MAX_BODY:
+        raise ValueError("Saved event exceeds limit")
+    try:
+        event = json.loads(raw)
+    except RecursionError:
+        raise ValueError("Nested saved event exceeds parser limit") from None
+    payload, kind = event["payload"], event["event_type"]
+    occurred = datetime.fromisoformat(event["occurred_at"])
+    if occurred.tzinfo is None:
+        raise ValueError("Aware event time required")
+    if kind == EVENT_TYPE:
+        expected = envelope(Job(id=payload["job_id"], event_id=payload["ingress_event_id"],
+                                state=payload["state"], attempts=payload["attempts"], updated_at=occurred), tenant_id, bot_id)
+    elif kind == SOURCE_TYPES["auth"]:
+        expected = metadata_envelope("auth", Tenant(id=tenant_id, role=payload["observed_role"],
+                                     created_at=payload["tenant_created_at"]), tenant_id, bot_id)
+        expected["occurred_at"] = utc_timestamp(occurred)
+    elif kind == SOURCE_TYPES["webhook"]:
+        expected = metadata_envelope("webhook", Bot(id=bot_id, tenant_id=tenant_id,
+                                     is_active=payload["is_active"], webhook_status=payload["webhook_status"],
+                                     updated_at=occurred), tenant_id, bot_id)
+    else:
+        raise ValueError("Unknown event type")
+    if expected["event_id"] != identifier or not same_event(expected, event):
+        raise ValueError("Saved event identity mismatch")
+    return expected
 
 
 class Relay:
@@ -219,6 +263,81 @@ class Relay:
             raise ValueError("No source completed an authorized scan")
         return allowed, failures
 
+    def eventpipe_matches(self, wanted):
+        matches = {identifier: [] for identifier in wanted}
+        seen = set()
+        for page in range(1, 11):
+            rows = self.request("GET", "eventpipe_query", f"/api/v1/events?source=nexuscore&page={page}&size=100")
+            if not isinstance(rows, list) or len(rows) > 100:
+                raise ValueError("Invalid event list")
+            for row in rows:
+                remote_id = str(UUID(row["event_id"]))
+                if remote_id in seen or row["source"] != "nexuscore" or not isinstance(row["event_type"], str):
+                    raise ValueError("Invalid event summary")
+                seen.add(remote_id)
+                full = self.request("GET", "eventpipe_query", "/api/v1/events/" + remote_id)
+                if (full["event_id"] != remote_id or full["source"] != "nexuscore"
+                        or full["event_type"] != row["event_type"]
+                        or not isinstance(full["payload"], dict) or not isinstance(full["metadata"], dict)):
+                    raise ValueError("Invalid event detail")
+                for identifier in {full["payload"].get("event_id"), full["metadata"].get("relay_event_id")}:
+                    if identifier not in wanted:
+                        continue
+                    event = wanted[identifier]
+                    metadata = {"relay_event_id": identifier, **({"bot_id": event["bot_id"]} if event["bot_id"] else {})}
+                    matches[identifier].append(full["event_type"] == event["event_type"]
+                                               and same_event(full["payload"], event)
+                                               and same_event(full["metadata"], metadata))
+            if len(rows) < 100:
+                return matches
+        raise ValueError("Incomplete event scan")
+
+    def pipewatch_matches(self, event):
+        identifier = event["event_id"]
+        page = self.request("GET", "pipewatch", f"/api/v1/logs?service=nexuscore&trace_id={identifier}&page=1&size=2")
+        total, items = page["total"], page["items"]
+        if (type(total) is not int or total < 0 or type(page["page"]) is not int or page["page"] != 1
+                or type(page["size"]) is not int or page["size"] != 2
+                or not isinstance(items, list) or len(items) != min(total, 2)):
+            raise ValueError("Invalid log page")
+        matches = [item["service"] == "nexuscore" and item["trace_id"] == identifier
+                   and item["message"] == event["event_type"] and same_event(item["metadata"], event) for item in items]
+        return matches
+
+    def reconcile(self):
+        rows = self.db.execute("SELECT d.event_id,d.sink,e.envelope FROM relay_deliveries d "
+                               "LEFT JOIN relay_events e ON e.id=d.event_id WHERE d.state='unknown' "
+                               "ORDER BY d.event_id,d.sink LIMIT 101").fetchall()
+        if len(rows) > 100:
+            raise ValueError("Unknown delivery limit exceeded")
+        events = {}
+        for identifier, sink, raw in rows:
+            if sink not in SINKS:
+                raise ValueError("Unknown sink")
+            events[identifier] = saved_event(identifier, raw, self.tenant_id, self.bot_id)
+        counts = dict.fromkeys(("confirmed", "unresolved", "duplicates", "conflicts", "errors"), 0)
+        wanted = {identifier: events[identifier] for identifier, sink, _ in rows if sink == "eventpipe"}
+        eventpipe = None
+        if wanted:
+            try:
+                eventpipe = self.eventpipe_matches(wanted)
+            except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+                pass
+        for identifier, sink, _ in rows:
+            try:
+                if sink == "eventpipe":
+                    if eventpipe is None:
+                        raise ValueError("Event scan failed")
+                    matches = eventpipe[identifier]
+                else:
+                    matches = self.pipewatch_matches(events[identifier])
+                status = ("conflicts" if not all(matches) else "duplicates" if len(matches) > 1
+                          else "confirmed" if matches else "unresolved")
+                counts[status] += 1
+            except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+                counts["errors"] += 1
+        return counts
+
     def sweep(self):
         # Gate each type on its own fresh source authorization, including saved pending rows.
         allowed, failures = self.collect()
@@ -271,6 +390,8 @@ def main(argv=None):
     parser.add_argument("--bot-id", required=True)
     parser.add_argument("--state", required=True, type=Path)
     parser.add_argument("--interval", type=int, default=0)
+    parser.add_argument("--reconcile", action="store_true")
+    parser.add_argument("--eventpipe-query-origin")
     args = parser.parse_args(argv)
     try:
         origins = {role: origin(getattr(args, role + "_origin")) for role in (*SOURCE_TYPES, *SINKS)
@@ -279,14 +400,22 @@ def main(argv=None):
             raise ValueError("At least one source is required")
         if args.interval != 0 and not 5 <= args.interval <= 3600:
             raise ValueError("Invalid relay configuration")
+        if args.reconcile != bool(args.eventpipe_query_origin) or (args.reconcile and args.interval):
+            raise ValueError("Invalid reconciliation configuration")
+        query_origin = origin(args.eventpipe_query_origin) if args.reconcile else None
         tenant_id, bot_id = UUID(args.tenant_id), UUID(args.bot_id)
         token = os.environ.get("NEXUS_EVENTS_TOKEN", "")
         if not token or not token.isascii() or not token.isprintable() or any(c.isspace() for c in token) or len(token) > 8192:
             raise ValueError("Invalid bearer")
         binding = json.dumps({"version": 1, "origins": origins, "tenant": str(tenant_id), "bot": str(bot_id)}, sort_keys=True)
-        with closing(open_state(args.state, binding)) as db, httpx.Client(
+        with closing(open_state(args.state, binding, read_only=args.reconcile)) as db, httpx.Client(
                 timeout=httpx.Timeout(5, connect=2), trust_env=False, follow_redirects=False) as client:
             relay = Relay(db, client, origins, tenant_id, bot_id, token)
+            if args.reconcile:
+                origins["eventpipe_query"] = query_origin
+                counts = relay.reconcile()
+                print(json.dumps(counts), flush=True)
+                return int(any(counts[key] for key in ("unresolved", "duplicates", "conflicts", "errors")))
             while True:
                 counts = relay.sweep()
                 print(json.dumps(counts), flush=True)

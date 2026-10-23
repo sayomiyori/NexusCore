@@ -3,6 +3,8 @@
 The implemented [identity/bot source extension](observability-identity-bots.md)
 adds optional AuthFortress/WebHook sources and per-source authorization gating.
 The original AI-only contract and identity/state format below remain compatible.
+Explicit [read-only unknown reconciliation](observability-reconciliation.md)
+checks existing receiver evidence without resending or rewriting relay state.
 
 Connect the existing tenant-authorized AgentHub job metadata API to both
 EventPipe and PipeWatch, without changing sibling services or existing runtime.

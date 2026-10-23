@@ -1,5 +1,19 @@
 # Verification tooling errors
 
+## 2026-10-23: Reconciliation could miss an ID claimed under another outer type
+
+- Symptom: the first unshipped reconciliation draft filtered EventPipe summaries
+  by expected event type. A second record with a different outer type but the
+  same payload/metadata relay ID was skipped, falsely reporting confirmation.
+- Cause: a summary type filter hid records needed to detect identity conflicts;
+  full payload and relay metadata are available only on the detail endpoint.
+- Fix: inspect every listed `source=nexuscore` record within the fixed bounded
+  scan, then match both identity claims and full content. A conflicting candidate
+  takes precedence over otherwise matching copies. No state update or resend.
+- Detection: `test_foreign_outer_event_type_cannot_hide_a_claimed_relay_identity`
+  adds a differently typed conflicting copy with another storage UUID and
+  requires one EventPipe conflict while PipeWatch still confirms its copy.
+
 ## 2026-10-22: Cached EventPipe dual CLI did not finish on HTTP shutdown
 
 - Symptom: the new isolated observability fixture delivered and queried events,
