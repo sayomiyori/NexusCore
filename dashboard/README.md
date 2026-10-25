@@ -1,6 +1,6 @@
 # NexusCore dashboard
 
-Opt-in tenant Overview and Bots using existing AuthFortress, WebHook Manager,
+Opt-in tenant Overview, Bots and Events using existing AuthFortress, WebHook Manager,
 EventPipe query and PipeWatch HTTP contracts. Overview displays up to ten recent
 safe observations and authorized receiver availability. Bots displays a paged
 configuration inventory. Snapshots are not current bot health or lifetime totals.
@@ -31,6 +31,14 @@ returns to the first page. Bots uses Next page/First page and up to 50 records
 per response, without claiming a total. Names, activity flags and stored webhook
 states come from scoped configuration reads; no live Telegram health request is
 made. The views have no business mutation controls or automatic polling.
+
+Events inspects the same ten merged observations as Overview, with full event/
+bot IDs, UTC times, receiver evidence and observed attempt counts. Kind,
+receiver, attention and ID filters combine locally without extra requests.
+They apply only to the loaded window; Reset filters restores that window.
+Refresh, organization and section changes reset filters. This is not historical
+search or a complete audit log. Receiver names/statuses distinguish partial and
+unavailable reads; conflicting snapshots are explicitly marked.
 
 To check and run the optimized build:
 
@@ -83,9 +91,13 @@ public deployment or main-stack activation in this increment.
 
 Contract: [dashboard-overview.md](../specs/dashboard-overview.md).
 Bots contract: [dashboard-bots.md](../specs/dashboard-bots.md).
+Events contract: [dashboard-events.md](../specs/dashboard-events.md).
 Verification: [Overview acceptance](../docs/dashboard-overview-2026-10-23.md),
-[Bots acceptance](../docs/dashboard-bots-2026-10-25.md).
+[Bots acceptance](../docs/dashboard-bots-2026-10-25.md),
+[Events acceptance](../docs/dashboard-events-2026-10-25.md).
 
 ![Verified synthetic tenant Overview](../docs/images/dashboard-overview-2026-10-23.png)
 
 ![Verified synthetic tenant Bots](../docs/images/dashboard-bots-2026-10-25.png)
+
+![Verified synthetic recent Events](../docs/images/dashboard-events-2026-10-25.png)
