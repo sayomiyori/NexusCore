@@ -38,7 +38,7 @@ export function tenantView(value: unknown): Tenant {
   return { id: uuid(item.id), name: text(item.name, 128), role: item.role };
 }
 
-function timestamp(value: unknown): string {
+export function timestamp(value: unknown): string {
   const result = text(value, 40);
   if (
     !/^\d{4}-\d\d-\d\dT.+(?:Z|[+-]\d\d:\d\d)$/.test(result) ||
@@ -239,10 +239,10 @@ async function pipewatch(token: string, tenant: string): Promise<Evidence[]> {
   });
 }
 
-export async function overview(
+export async function authorizedTenant(
   token: string,
   selected: string,
-): Promise<Overview> {
+): Promise<Tenant> {
   const tenant = tenantView(
     await requestJson(
       origin("AUTH"),
@@ -251,6 +251,14 @@ export async function overview(
     ),
   );
   if (tenant.id !== selected) throw new ApiError(502);
+  return tenant;
+}
+
+export async function overview(
+  token: string,
+  selected: string,
+): Promise<Overview> {
+  const tenant = await authorizedTenant(token, selected);
   const results = await Promise.allSettled([
     eventpipe(token, selected),
     pipewatch(token, selected),

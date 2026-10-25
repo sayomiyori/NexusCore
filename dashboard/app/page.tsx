@@ -1,9 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { BotPage } from "../lib/bots.ts";
 import type { Observation, Overview, Tenant } from "../lib/overview.ts";
 
 type TenantPage = { items: Tenant[]; hasMore: boolean; offset: number };
+type Selection = {
+  tenant: string;
+  view: "overview" | "bots";
+  cursor: string | null;
+};
 class RequestError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -55,9 +61,14 @@ export default function Page() {
     "loading",
   );
   const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [selection, setSelection] = useState({ tenant: "" });
+  const [selection, setSelection] = useState<Selection>({
+    tenant: "",
+    view: "overview",
+    cursor: null,
+  });
   const selected = selection.tenant;
-  const [data, setData] = useState<Overview | null>(null);
+  const title = selection.view === "overview" ? "Overview" : "Bots";
+  const [data, setData] = useState<Overview | BotPage | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState("");
@@ -66,12 +77,19 @@ export default function Page() {
   const query = useRef<AbortController | null>(null);
   const codeInput = useRef<HTMLInputElement>(null);
 
-  const choose = useCallback((id: string) => {
-    query.current?.abort();
-    setData(null);
-    setError("");
-    setSelection({ tenant: id });
-  }, []);
+  const choose = useCallback(
+    (id: string, view?: Selection["view"], cursor: string | null = null) => {
+      query.current?.abort();
+      setData(null);
+      setError("");
+      setSelection((current) => ({
+        tenant: id,
+        view: view ?? current.view,
+        cursor,
+      }));
+    },
+    [],
+  );
 
   const expire = useCallback(() => {
     choose("");
@@ -123,7 +141,8 @@ export default function Page() {
     if (!tenant || screen !== "overview") return;
     const controller = new AbortController();
     query.current = controller;
-    api<Overview>(`/api/overview?tenant=${tenant}`, {
+    const path = `/api/${selection.view}?tenant=${tenant}${selection.view === "bots" && selection.cursor ? `&cursor=${selection.cursor}` : ""}`;
+    api<Overview | BotPage>(path, {
       signal: controller.signal,
     })
       .then((result) => {
@@ -366,10 +385,24 @@ export default function Page() {
             Load more organizations
           </button>
         )}
-        <div className="nav-active">
-          <span aria-hidden="true">▦</span>Overview
-          <span className="nav-dot" />
-        </div>
+        <nav className="workspace-nav" aria-label="Workspace sections">
+          {(["overview", "bots"] as const).map((view) => (
+            <button
+              key={view}
+              type="button"
+              disabled={busy}
+              className={`nav-item${selection.view === view ? " nav-active" : ""}`}
+              aria-current={selection.view === view ? "page" : undefined}
+              onClick={() => choose(selected, view)}
+            >
+              <span aria-hidden="true">{view === "overview" ? "▦" : "◇"}</span>
+              {view === "overview" ? "Overview" : "Bots"}
+              {selection.view === view && (
+                <span className="nav-dot" aria-hidden="true" />
+              )}
+            </button>
+          ))}
+        </nav>
         <div className="sidebar-bottom">
           <span className="read-only">READ ONLY</span>
           <p>
@@ -390,7 +423,7 @@ export default function Page() {
       <main className="main">
         <header className="topbar">
           <span>
-            Workspace <span aria-hidden="true">/</span> Overview
+            Workspace <span aria-hidden="true">/</span> {title}
           </span>
           <span className="view-badge">Tenant view</span>
         </header>
@@ -398,9 +431,11 @@ export default function Page() {
           <div className="page-heading">
             <div>
               <span className="eyebrow">WORKSPACE AT A GLANCE</span>
-              <h1>Overview</h1>
+              <h1>{title}</h1>
               <p>
-                Recent observations across{" "}
+                {selection.view === "overview"
+                  ? "Recent observations across "
+                  : "Bot configuration for "}
                 {data?.tenant.name || "your organization"}.
               </p>
             </div>
@@ -424,10 +459,15 @@ export default function Page() {
           ) : pending ? (
             <section className="empty panel" aria-live="polite">
               <div className="loader" aria-hidden="true" />
-              <p role="status">Loading tenant observations…</p>
+              <p role="status">
+                {selection.view === "overview"
+                  ? "Loading tenant observations…"
+                  : "Loading tenant bots…"}
+              </p>
             </section>
           ) : (
-            data && (
+            data &&
+            "events" in data && (
               <>
                 <section className="cards" aria-label="Observation summary">
                   <article className="metric">
@@ -574,6 +614,87 @@ export default function Page() {
                 </div>
               </>
             )
+          )}
+          {data && "items" in data && (
+            <section className="panel bots" aria-label="Tenant bot inventory">
+              <div className="panel-heading">
+                <h2>Registered bots</h2>
+                <span>{data.items.length} on this page · Up to 50</span>
+              </div>
+              {data.items.length ? (
+                <ul className="bot-list">
+                  {data.items.map((bot) => (
+                    <li key={bot.id}>
+                      <div className="bot-identity">
+                        <h3>{bot.name}</h3>
+                        <code>{bot.id}</code>
+                        <p>
+                          Added{" "}
+                          <time dateTime={bot.created}>
+                            {new Date(bot.created).toLocaleDateString("en-GB", {
+                              timeZone: "UTC",
+                            })}
+                          </time>
+                        </p>
+                      </div>
+                      <div className="bot-status">
+                        <span className="bot-field">Configuration</span>
+                        <strong>{bot.active ? "Active" : "Inactive"}</strong>
+                        <span className="bot-field">Stored webhook status</span>
+                        <span
+                          className={`state${["failed", "unknown"].includes(bot.webhook) ? " attention" : ""}`}
+                        >
+                          {stateLabels[bot.webhook]}
+                        </span>
+                        <p>
+                          Updated{" "}
+                          <time dateTime={bot.updated}>
+                            {new Date(bot.updated).toLocaleDateString("en-GB", {
+                              timeZone: "UTC",
+                            })}
+                          </time>
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="empty">
+                  <h3>
+                    {selection.cursor
+                      ? "End of bot list"
+                      : "No bots registered"}
+                  </h3>
+                  <p>
+                    {selection.cursor
+                      ? "There are no more bots after this cursor."
+                      : "This organization has no registered bots."}
+                  </p>
+                </div>
+              )}
+              <nav className="bot-pagination" aria-label="Bot pages">
+                <button
+                  type="button"
+                  className="refresh"
+                  disabled={!selection.cursor || busy}
+                  onClick={() => choose(selected, "bots")}
+                >
+                  First page
+                </button>
+                <button
+                  type="button"
+                  className="refresh"
+                  disabled={!data.nextCursor || busy}
+                  onClick={() => choose(selected, "bots", data.nextCursor)}
+                >
+                  Next page <span aria-hidden="true">→</span>
+                </button>
+              </nav>
+              <p className="activity-foot">
+                Configuration records from WebHook Manager. No live Telegram
+                health check is performed. Refresh returns to the first page.
+              </p>
+            </section>
           )}
         </div>
         <footer className="footer">

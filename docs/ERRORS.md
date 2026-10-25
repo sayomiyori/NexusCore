@@ -1,5 +1,18 @@
 # Verification tooling errors
 
+## 2026-10-25: Dashboard bot names counted UTF-16 units instead of characters
+
+- Symptom: the unshipped Bots BFF rejected a valid backend name with 65–128
+  astral Unicode characters and made the entire page unavailable.
+- Cause: the existing generic `text(value, 128)` guard uses JavaScript length
+  (UTF-16 units); Python validation/PostgreSQL VARCHAR(128) use code points.
+- Fix: keep a bounded nonempty string guard (at most 256 UTF-16 units), then
+  enforce at most 128 Unicode code points locally for bot names. Other transport,
+  identifier and credential text bounds retain their existing semantics.
+- Detection: `bot names use the backend Unicode code point limit` calls the real
+  dashboard GET handler with HTTP source responses; 65/128 emoji return 200,
+  129 return 502. Independent review reproduced the original failure and fix.
+
 ## 2026-10-23: Isolated SeaweedFS exhausted its single internal volume slot
 
 - Symptom: the first private dashboard fixture's EventPipe transform exhausted

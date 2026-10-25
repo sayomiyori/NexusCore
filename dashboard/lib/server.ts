@@ -71,7 +71,9 @@ export function privateOrigin(
   return url.origin;
 }
 
-export function origin(role: "AUTH" | "EVENTPIPE" | "PIPEWATCH"): string {
+export function origin(
+  role: "AUTH" | "EVENTPIPE" | "PIPEWATCH" | "WEBHOOK",
+): string {
   return privateOrigin(process.env[`DASHBOARD_${role}_ORIGIN`]);
 }
 

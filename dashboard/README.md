@@ -1,15 +1,16 @@
-# NexusCore Overview
+# NexusCore dashboard
 
-Opt-in tenant Overview using existing AuthFortress, EventPipe query and PipeWatch
-HTTP contracts. It displays up to ten recent safe observations and authorized
-receiver availability. Snapshots are not current bot health or lifetime totals.
+Opt-in tenant Overview and Bots using existing AuthFortress, WebHook Manager,
+EventPipe query and PipeWatch HTTP contracts. Overview displays up to ten recent
+safe observations and authorized receiver availability. Bots displays a paged
+configuration inventory. Snapshots are not current bot health or lifetime totals.
 This package does not start or modify the root deployment.
 
 ## Run locally
 
 Use Node.js 24 and npm. First prepare a separate isolated service fixture with
 synthetic accounts and events. Expose only its AuthFortress, EventPipe query and
-PipeWatch HTTP APIs on unused `127.0.0.1` ports. An `internal` Docker network does
+PipeWatch and WebHook Manager HTTP APIs on unused `127.0.0.1` ports. An `internal` Docker network does
 not provide usable published ports; keep it isolated and use a bounded local
 docker-exec HTTP bridge for that fixture, as in the acceptance record. Never use the main deployment's
 environment file or enable provider workers for dashboard verification.
@@ -19,14 +20,17 @@ In PowerShell, from `dashboard/`:
 ```powershell
 npm ci
 Copy-Item .env.example .env.local
-# Set the three service origins to the isolated fixture's actual loopback ports.
+# Set the four service origins to the isolated fixture's actual loopback ports.
 # DASHBOARD_ORIGIN must match the browser URL, including its port.
 npm run dev
 ```
 
 Open `http://127.0.0.1:3000` and sign in with an account created in that fixture.
-Select an authorized organization; use Refresh to request a fresh observation
-window. The view has no business mutation controls or automatic polling.
+Select an authorized organization and switch between Overview and Bots. Refresh
+returns to the first page. Bots uses Next page/First page and up to 50 records
+per response, without claiming a total. Names, activity flags and stored webhook
+states come from scoped configuration reads; no live Telegram health request is
+made. The views have no business mutation controls or automatic polling.
 
 To check and run the optimized build:
 
@@ -54,6 +58,11 @@ only numeric IPv4 loopback, not public hosts or forwarded headers.
 - Each Overview request checks current issuer membership before any sink query.
   Every sink request carries that identity and canonical tenant scope. No shared
   user cache, sibling imports, database access or secret-bearing browser config.
+- Each Bots request repeats issuer membership before the WebHook Manager read.
+  The BFF validates tenant, UUID ordering/cursors, active flags, known webhook
+  states and dates. Bot names follow the backend's 128 Unicode code point limit.
+  Tokens, ciphertext, Telegram identifiers, usernames and webhook URLs are
+  excluded. Tenant/section changes clear prior data and abort stale reads.
 - Server-only origins accept explicit numeric private/loopback HTTP(S) addresses.
   Direct requests ignore proxies, reject redirects and have bounded JSON sizes
   and five-second absolute deadlines. Wrong Host/Origin mutations are rejected.
@@ -72,6 +81,10 @@ No registration, OAuth, refresh workflow, bot/AI editing, costs, Telegram alerts
 public deployment or main-stack activation in this increment.
 
 Contract: [dashboard-overview.md](../specs/dashboard-overview.md).
-Verification: [acceptance record](../docs/dashboard-overview-2026-10-23.md).
+Bots contract: [dashboard-bots.md](../specs/dashboard-bots.md).
+Verification: [Overview acceptance](../docs/dashboard-overview-2026-10-23.md),
+[Bots acceptance](../docs/dashboard-bots-2026-10-25.md).
 
 ![Verified synthetic tenant Overview](../docs/images/dashboard-overview-2026-10-23.png)
+
+![Verified synthetic tenant Bots](../docs/images/dashboard-bots-2026-10-25.png)

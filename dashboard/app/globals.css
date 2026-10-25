@@ -272,19 +272,28 @@ input {
   font-size: 12px;
   text-overflow: ellipsis;
 }
-.nav-active {
+.workspace-nav {
+  display: grid;
+  gap: 8px;
+  margin-top: 27px;
+}
+.nav-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 27px;
+  width: 100%;
   padding: 11px 13px;
-  background: var(--soft);
+  background: transparent;
   border-radius: 6px;
-  color: var(--accent);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
-.nav-active > span:first-child {
+.nav-active {
+  background: var(--soft);
+  color: var(--accent);
+}
+.nav-item > span:first-child {
   font-size: 19px;
   line-height: 1;
 }
@@ -639,6 +648,56 @@ input {
   font-size: 9px;
   color: #56675e;
 }
+.bot-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.bot-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 0.45fr);
+  gap: 24px;
+  padding: 24px;
+  border-bottom: 1px solid var(--line);
+}
+.bot-identity h3 {
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.bot-identity code {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  margin-top: 7px;
+}
+.bot-list p,
+.bot-field {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 8px;
+}
+.bot-field {
+  display: block;
+  margin: 0 0 4px;
+}
+.bot-status strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.bot-status .state {
+  display: inline-block;
+  font-size: 11px;
+  max-width: none;
+  margin: 0;
+}
+.bot-pagination {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px;
+}
 @media (min-width: 1500px) {
   .content {
     padding-top: 55px;
@@ -718,10 +777,27 @@ input {
     font-size: 22px;
   }
   .workspace-label,
-  .nav-active,
   .sidebar-bottom p,
   .read-only {
     display: none;
+  }
+  .workspace-nav {
+    display: flex;
+    grid-column: 1 / -1;
+    gap: 8px;
+    margin: 0;
+  }
+  .nav-item {
+    flex: 1;
+    padding: 10px 12px;
+  }
+  .bot-list li {
+    grid-template-columns: 1fr;
+    padding: 20px 16px;
+    gap: 18px;
+  }
+  .bot-pagination {
+    padding: 16px;
   }
   .tenant-label {
     grid-row: 2;
@@ -769,6 +845,9 @@ input {
     margin-top: 28px;
     padding: 8px;
     font-size: 10px;
+  }
+  .bot-pagination .refresh {
+    margin: 0;
   }
   .cards {
     gap: 9px;
