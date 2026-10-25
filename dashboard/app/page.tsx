@@ -6,12 +6,13 @@ import { api, RequestError } from "../lib/client.ts";
 import { kindLabels, needsAttention, stateLabels } from "../lib/event-view.ts";
 import type { Overview, Tenant } from "../lib/overview.ts";
 import Events from "./events.tsx";
+import Jobs from "./jobs.tsx";
 import Usage from "./usage.tsx";
 
 type TenantPage = { items: Tenant[]; hasMore: boolean; offset: number };
 type Selection = {
   tenant: string;
-  view: "overview" | "bots" | "events" | "usage";
+  view: "overview" | "bots" | "events" | "usage" | "jobs";
   cursor: string | null;
 };
 export default function Page() {
@@ -30,6 +31,7 @@ export default function Page() {
     bots: "Bots",
     events: "Events",
     usage: "Usage",
+    jobs: "AI jobs",
   }[selection.view];
   const [data, setData] = useState<Overview | BotPage | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -104,7 +106,7 @@ export default function Page() {
     if (!tenant || screen !== "overview") return;
     const controller = new AbortController();
     query.current = controller;
-    const botView = selection.view === "bots" || selection.view === "usage";
+    const botView = ["bots", "usage", "jobs"].includes(selection.view);
     const path = `/api/${botView ? "bots" : "overview"}?tenant=${tenant}${botView && selection.cursor ? `&cursor=${selection.cursor}` : ""}`;
     api<Overview | BotPage>(path, {
       signal: controller.signal,
@@ -350,37 +352,42 @@ export default function Page() {
           </button>
         )}
         <nav className="workspace-nav" aria-label="Workspace sections">
-          {(["overview", "bots", "events", "usage"] as const).map((view) => (
-            <button
-              key={view}
-              type="button"
-              disabled={busy}
-              className={`nav-item${selection.view === view ? " nav-active" : ""}`}
-              aria-current={selection.view === view ? "page" : undefined}
-              onClick={() => choose(selected, view)}
-            >
-              <span aria-hidden="true">
-                {view === "overview"
-                  ? "▦"
-                  : view === "bots"
-                    ? "◇"
-                    : view === "events"
-                      ? "≡"
-                      : "$"}
-              </span>
-              {
+          {(["overview", "bots", "events", "usage", "jobs"] as const).map(
+            (view) => (
+              <button
+                key={view}
+                type="button"
+                disabled={busy}
+                className={`nav-item${selection.view === view ? " nav-active" : ""}`}
+                aria-current={selection.view === view ? "page" : undefined}
+                onClick={() => choose(selected, view)}
+              >
+                <span aria-hidden="true">
+                  {view === "overview"
+                    ? "▦"
+                    : view === "bots"
+                      ? "◇"
+                      : view === "events"
+                        ? "≡"
+                        : view === "usage"
+                          ? "$"
+                          : "AI"}
+                </span>
                 {
-                  overview: "Overview",
-                  bots: "Bots",
-                  events: "Events",
-                  usage: "Usage",
-                }[view]
-              }
-              {selection.view === view && (
-                <span className="nav-dot" aria-hidden="true" />
-              )}
-            </button>
-          ))}
+                  {
+                    overview: "Overview",
+                    bots: "Bots",
+                    events: "Events",
+                    usage: "Usage",
+                    jobs: "AI jobs",
+                  }[view]
+                }
+                {selection.view === view && (
+                  <span className="nav-dot" aria-hidden="true" />
+                )}
+              </button>
+            ),
+          )}
         </nav>
         <div className="sidebar-bottom">
           <span className="read-only">READ ONLY</span>
@@ -412,11 +419,13 @@ export default function Page() {
               <span className="eyebrow">WORKSPACE AT A GLANCE</span>
               <h1>{title}</h1>
               <p>
-                {selection.view === "usage"
-                  ? "Recorded usage for "
-                  : selection.view === "bots"
-                    ? "Bot configuration for "
-                    : "Recent observations across "}
+                {selection.view === "jobs"
+                  ? "Stored job metadata for "
+                  : selection.view === "usage"
+                    ? "Recorded usage for "
+                    : selection.view === "bots"
+                      ? "Bot configuration for "
+                      : "Recent observations across "}
                 {data?.tenant.name || "your organization"}.
               </p>
             </div>
@@ -441,7 +450,7 @@ export default function Page() {
             <section className="empty panel" aria-live="polite">
               <div className="loader" aria-hidden="true" />
               <p role="status">
-                {selection.view === "bots" || selection.view === "usage"
+                {["bots", "usage", "jobs"].includes(selection.view)
                   ? "Loading tenant bots…"
                   : "Loading tenant observations…"}
               </p>
@@ -606,6 +615,15 @@ export default function Page() {
               canFirst={Boolean(selection.cursor)}
               onFirst={() => choose(selected, "usage")}
               onNext={() => choose(selected, "usage", data.nextCursor)}
+              onExpired={expire}
+            />
+          )}
+          {data && "items" in data && selection.view === "jobs" && (
+            <Jobs
+              data={data}
+              canFirst={Boolean(selection.cursor)}
+              onFirst={() => choose(selected, "jobs")}
+              onNext={() => choose(selected, "jobs", data.nextCursor)}
               onExpired={expire}
             />
           )}

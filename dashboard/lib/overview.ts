@@ -53,6 +53,16 @@ export function timestamp(value: unknown): string {
     !Number.isFinite(Date.parse(result))
   )
     throw new ApiError(502);
+  // Validate the local calendar separately: a valid offset may cross a UTC day.
+  const day = result.slice(0, 10),
+    calendar = new Date(`${day}T00:00:00Z`);
+  if (
+    day.startsWith("0000") ||
+    !Number.isFinite(calendar.getTime()) ||
+    calendar.toISOString().slice(0, 10) !== day ||
+    Number(result.slice(11, 13)) > 23
+  )
+    throw new ApiError(502);
   return new Date(result).toISOString();
 }
 

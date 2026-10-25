@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import http from "node:http";
 import { after, before, test } from "node:test";
-import { observation, tenantView } from "../lib/overview.ts";
+import { observation, tenantView, timestamp } from "../lib/overview.ts";
 import { ApiError, privateOrigin, requestJson } from "../lib/server.ts";
 
 test("small dashboard text and control focus meet WCAG AA contrast", () => {
@@ -196,6 +196,30 @@ test("observation allowlist validates complete safe scope and typed fields", () 
     assert.throws(() => observation(bad, tenant), ApiError);
   }
   assert.equal(observation({ event_type: "future.unsupported" }, tenant), null);
+});
+
+test("stored timestamps reject impossible calendars without rejecting offset day changes", () => {
+  for (const value of [
+    "2026-02-30T12:34:00Z",
+    "2026-04-31T12:34:00Z",
+    "2026-02-29T12:34:00Z",
+    "2024-02-29T24:00:00Z",
+    "0000-01-01T00:00:00Z",
+  ]) {
+    assert.throws(() => timestamp(value), ApiError);
+    assert.throws(
+      () => observation({ ...job, occurred_at: value }, tenant),
+      ApiError,
+    );
+  }
+  assert.equal(
+    timestamp("2024-02-29T23:59:59.123456-03:00"),
+    "2024-03-01T02:59:59.123Z",
+  );
+  assert.equal(
+    timestamp("2026-03-01T00:00:00+03:00"),
+    "2026-02-28T21:00:00.000Z",
+  );
 });
 
 test("all observation types preserve full-content conflict keys without exporting payloads", () => {

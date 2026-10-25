@@ -1,6 +1,6 @@
 # NexusCore dashboard
 
-Opt-in tenant Overview, Bots, Events and Usage using existing AuthFortress,
+Opt-in tenant Overview, Bots, Events, Usage and AI jobs using existing AuthFortress,
 WebHook Manager, AgentHub, EventPipe query and PipeWatch HTTP contracts. Overview displays up to ten recent
 safe observations and authorized receiver availability. Bots displays a paged
 configuration inventory; Usage reads one active bot's recorded token/cost
@@ -54,6 +54,15 @@ AgentHub reads require `PLATFORM_READ_ENABLED=true` only in the isolated fixture
 keep AI processing, real credentials and workers disabled. Setting a dashboard
 origin does not activate a backend feature.
 
+AI jobs uses the same active-bot selector with an explicit Load jobs action.
+First bot page/Next bot page select a bot inventory page; First job page/Next
+job page navigate its stored job metadata separately. A full 50-job page can
+be the final page, following AgentHub's existing cursor contract. Only job/event
+IDs, known states, recorded attempts and UTC timestamps are shown. Bot, scope,
+section, Refresh and bot-page changes clear/abort prior results. Reads do not
+execute, retry, reconcile or resend jobs. Raw envelopes, answers, errors,
+provider/model and worker claims are excluded.
+
 To check and run the optimized build:
 
 ```powershell
@@ -90,6 +99,9 @@ only numeric IPv4 loopback, not public hosts or forwarded headers.
   Counts must be nonnegative safe integers. Bounded Decimal strings are normalized
   with integer arithmetic; malformed/oversize/negative/inexact values fail closed.
   Provider/model names, messages and raw usage records are excluded.
+- Each AI jobs request repeats issuer membership before AgentHub's scoped read.
+  Job IDs must be strictly ordered, input event IDs unique, attempts bounded and
+  dates valid before UTC normalization. Invalid source pages fail closed.
 - Server-only origins accept explicit numeric private/loopback HTTP(S) addresses.
   Direct requests ignore proxies, reject redirects and have bounded JSON sizes
   and five-second absolute deadlines. Wrong Host/Origin mutations are rejected.
@@ -111,10 +123,12 @@ Contract: [dashboard-overview.md](../specs/dashboard-overview.md).
 Bots contract: [dashboard-bots.md](../specs/dashboard-bots.md).
 Events contract: [dashboard-events.md](../specs/dashboard-events.md).
 Usage contract: [dashboard-usage.md](../specs/dashboard-usage.md).
+AI jobs contract: [dashboard-jobs.md](../specs/dashboard-jobs.md).
 Verification: [Overview acceptance](../docs/dashboard-overview-2026-10-23.md),
 [Bots acceptance](../docs/dashboard-bots-2026-10-25.md),
 [Events acceptance](../docs/dashboard-events-2026-10-25.md),
-[Usage acceptance](../docs/dashboard-usage-2026-10-25.md).
+[Usage acceptance](../docs/dashboard-usage-2026-10-25.md),
+[AI jobs acceptance](../docs/dashboard-jobs-2026-10-25.md).
 
 ![Verified synthetic tenant Overview](../docs/images/dashboard-overview-2026-10-23.png)
 
@@ -123,3 +137,5 @@ Verification: [Overview acceptance](../docs/dashboard-overview-2026-10-23.md),
 ![Verified synthetic recent Events](../docs/images/dashboard-events-2026-10-25.png)
 
 ![Verified synthetic per-bot Usage](../docs/images/dashboard-usage-2026-10-25.png)
+
+![Verified synthetic per-bot AI jobs](../docs/images/dashboard-jobs-2026-10-25.png)

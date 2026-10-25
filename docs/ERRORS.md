@@ -1,5 +1,18 @@
 # Verification tooling errors
 
+## 2026-10-25: Stored dashboard timestamps normalized impossible calendar dates
+
+- Symptom: the unshipped Jobs BFF accepted February 30 / April 31 from a source
+  and displayed a different day. The shared snapshot date guard had the same gap.
+- Cause: JavaScript `Date.parse` accepts and normalizes some impossible dates;
+  checking only timezone syntax and a finite timestamp did not validate calendars.
+- Fix: validate the original local calendar independently before UTC conversion;
+  reject year 0000 and hour 24, which Python datetime producers cannot emit.
+  Valid offset day changes and microsecond input retain existing normalization.
+- Detection: the stored-timestamp unit/observation regression failed before the
+  fix; Jobs HTTP regressions require 502 for impossible created/updated dates.
+  Leap dates and positive/negative offsets still pass.
+
 ## 2026-10-25: Unicode organization names made the workspace unavailable
 
 - Symptom: a valid AuthFortress tenant name containing 65–128 emoji caused the
