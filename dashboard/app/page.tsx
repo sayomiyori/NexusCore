@@ -2,41 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BotPage } from "../lib/bots.ts";
+import { api, RequestError } from "../lib/client.ts";
 import { kindLabels, needsAttention, stateLabels } from "../lib/event-view.ts";
 import type { Overview, Tenant } from "../lib/overview.ts";
 import Events from "./events.tsx";
+import Usage from "./usage.tsx";
 
 type TenantPage = { items: Tenant[]; hasMore: boolean; offset: number };
 type Selection = {
   tenant: string;
-  view: "overview" | "bots" | "events";
+  view: "overview" | "bots" | "events" | "usage";
   cursor: string | null;
 };
-class RequestError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
-
-async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
-    ...options,
-    cache: "no-store",
-    credentials: "same-origin",
-  });
-  const data = await response.json();
-  if (!response.ok)
-    throw new RequestError(
-      response.status,
-      typeof data.error === "string"
-        ? data.error
-        : "Data is temporarily unavailable.",
-    );
-  return data as T;
-}
-
 export default function Page() {
   const [screen, setScreen] = useState<"loading" | "login" | "overview">(
     "loading",
@@ -48,9 +25,12 @@ export default function Page() {
     cursor: null,
   });
   const selected = selection.tenant;
-  const title = { overview: "Overview", bots: "Bots", events: "Events" }[
-    selection.view
-  ];
+  const title = {
+    overview: "Overview",
+    bots: "Bots",
+    events: "Events",
+    usage: "Usage",
+  }[selection.view];
   const [data, setData] = useState<Overview | BotPage | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
@@ -124,7 +104,8 @@ export default function Page() {
     if (!tenant || screen !== "overview") return;
     const controller = new AbortController();
     query.current = controller;
-    const path = `/api/${selection.view === "bots" ? "bots" : "overview"}?tenant=${tenant}${selection.view === "bots" && selection.cursor ? `&cursor=${selection.cursor}` : ""}`;
+    const botView = selection.view === "bots" || selection.view === "usage";
+    const path = `/api/${botView ? "bots" : "overview"}?tenant=${tenant}${botView && selection.cursor ? `&cursor=${selection.cursor}` : ""}`;
     api<Overview | BotPage>(path, {
       signal: controller.signal,
     })
@@ -369,7 +350,7 @@ export default function Page() {
           </button>
         )}
         <nav className="workspace-nav" aria-label="Workspace sections">
-          {(["overview", "bots", "events"] as const).map((view) => (
+          {(["overview", "bots", "events", "usage"] as const).map((view) => (
             <button
               key={view}
               type="button"
@@ -379,9 +360,22 @@ export default function Page() {
               onClick={() => choose(selected, view)}
             >
               <span aria-hidden="true">
-                {view === "overview" ? "▦" : view === "bots" ? "◇" : "≡"}
+                {view === "overview"
+                  ? "▦"
+                  : view === "bots"
+                    ? "◇"
+                    : view === "events"
+                      ? "≡"
+                      : "$"}
               </span>
-              {{ overview: "Overview", bots: "Bots", events: "Events" }[view]}
+              {
+                {
+                  overview: "Overview",
+                  bots: "Bots",
+                  events: "Events",
+                  usage: "Usage",
+                }[view]
+              }
               {selection.view === view && (
                 <span className="nav-dot" aria-hidden="true" />
               )}
@@ -418,9 +412,11 @@ export default function Page() {
               <span className="eyebrow">WORKSPACE AT A GLANCE</span>
               <h1>{title}</h1>
               <p>
-                {selection.view === "bots"
-                  ? "Bot configuration for "
-                  : "Recent observations across "}
+                {selection.view === "usage"
+                  ? "Recorded usage for "
+                  : selection.view === "bots"
+                    ? "Bot configuration for "
+                    : "Recent observations across "}
                 {data?.tenant.name || "your organization"}.
               </p>
             </div>
@@ -445,7 +441,7 @@ export default function Page() {
             <section className="empty panel" aria-live="polite">
               <div className="loader" aria-hidden="true" />
               <p role="status">
-                {selection.view === "bots"
+                {selection.view === "bots" || selection.view === "usage"
                   ? "Loading tenant bots…"
                   : "Loading tenant observations…"}
               </p>
@@ -604,7 +600,16 @@ export default function Page() {
           {data && "events" in data && selection.view === "events" && (
             <Events data={data} />
           )}
-          {data && "items" in data && (
+          {data && "items" in data && selection.view === "usage" && (
+            <Usage
+              data={data}
+              canFirst={Boolean(selection.cursor)}
+              onFirst={() => choose(selected, "usage")}
+              onNext={() => choose(selected, "usage", data.nextCursor)}
+              onExpired={expire}
+            />
+          )}
+          {data && "items" in data && selection.view === "bots" && (
             <section className="panel bots" aria-label="Tenant bot inventory">
               <div className="panel-heading">
                 <h2>Registered bots</h2>

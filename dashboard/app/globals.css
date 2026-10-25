@@ -735,7 +735,8 @@ input {
   font-weight: 700;
   min-width: 0;
 }
-.event-filters select {
+.event-filters select,
+.usage-form select {
   width: 100%;
   height: 45px;
   margin-top: 8px;
@@ -802,6 +803,45 @@ input {
   margin-top: 16px;
   color: var(--muted);
   font-size: 12px;
+}
+.usage-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding: 24px;
+}
+.usage-form label {
+  margin: 0;
+  min-width: 0;
+}
+.usage-form label:first-child,
+.usage-bot-id {
+  grid-column: 1 / -1;
+}
+.usage-form .refresh {
+  margin: 0;
+  justify-self: start;
+}
+.usage-bot-id,
+.usage-message {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.usage-message {
+  padding: 20px 24px;
+}
+.usage > .notice {
+  margin: 20px 24px;
+}
+.usage-cards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 0 24px;
+  margin-bottom: 24px;
+}
+.usage-cards strong {
+  font-size: 30px;
+  overflow-wrap: anywhere;
 }
 @media (min-width: 1500px) {
   .content {
@@ -887,13 +927,13 @@ input {
     display: none;
   }
   .workspace-nav {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-column: 1 / -1;
     gap: 8px;
     margin: 0;
   }
   .nav-item {
-    flex: 1;
     padding: 10px 12px;
   }
   .bot-list li {
@@ -959,6 +999,14 @@ input {
     margin: 16px;
   }
   .event-filters .refresh {
+    margin: 0;
+  }
+  .usage-form,
+  .usage-cards {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+  .usage-form .refresh {
     margin: 0;
   }
   .events-window,
