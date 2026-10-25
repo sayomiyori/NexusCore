@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { ApiError, origin, record, requestJson, text, uuid } from "./server.ts";
+import {
+  ApiError,
+  displayName,
+  origin,
+  record,
+  requestJson,
+  text,
+  uuid,
+} from "./server.ts";
 
 export type Tenant = { id: string; name: string; role: "owner" | "member" };
 export type Observation = {
@@ -35,7 +43,7 @@ function evidence(view: Observation, raw: Record<string, unknown>): Evidence {
 export function tenantView(value: unknown): Tenant {
   const item = record(value);
   if (item.role !== "owner" && item.role !== "member") throw new ApiError(502);
-  return { id: uuid(item.id), name: text(item.name, 128), role: item.role };
+  return { id: uuid(item.id), name: displayName(item.name), role: item.role };
 }
 
 export function timestamp(value: unknown): string {

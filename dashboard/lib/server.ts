@@ -23,6 +23,13 @@ export function text(value: unknown, max = 8192): string {
   return value;
 }
 
+export function displayName(value: unknown): string {
+  // Both issuer and bot names allow 128 Unicode code points, not UTF-16 units.
+  const result = text(value, 256);
+  if (Array.from(result).length > 128) throw new ApiError(502);
+  return result;
+}
+
 export function uuid(value: unknown): string {
   const result = text(value, 36);
   if (

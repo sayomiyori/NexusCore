@@ -1,5 +1,12 @@
 import { authorizedTenant, type Tenant, timestamp } from "./overview.ts";
-import { ApiError, origin, record, requestJson, text, uuid } from "./server.ts";
+import {
+  ApiError,
+  displayName,
+  origin,
+  record,
+  requestJson,
+  uuid,
+} from "./server.ts";
 
 export type Bot = {
   id: string;
@@ -40,12 +47,10 @@ export async function bots(
   const items = page.items.map((value): Bot => {
     const item = record(value),
       id = uuid(item.id);
-    // The backend counts Unicode code points; JavaScript length counts UTF-16 units.
-    const name = text(item.name, 256);
+    const name = displayName(item.name);
     if (
       item.tenant_id !== tenant.id ||
       id <= previous ||
-      Array.from(name).length > 128 ||
       typeof item.is_active !== "boolean" ||
       typeof item.webhook_status !== "string" ||
       ![

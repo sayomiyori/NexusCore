@@ -60,7 +60,8 @@ only numeric IPv4 loopback, not public hosts or forwarded headers.
   user cache, sibling imports, database access or secret-bearing browser config.
 - Each Bots request repeats issuer membership before the WebHook Manager read.
   The BFF validates tenant, UUID ordering/cursors, active flags, known webhook
-  states and dates. Bot names follow the backend's 128 Unicode code point limit.
+  states and dates. Bot and organization names follow their backends' 128
+  Unicode code point limits.
   Tokens, ciphertext, Telegram identifiers, usernames and webhook URLs are
   excluded. Tenant/section changes clear prior data and abort stale reads.
 - Server-only origins accept explicit numeric private/loopback HTTP(S) addresses.

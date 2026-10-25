@@ -1,5 +1,17 @@
 # Verification tooling errors
 
+## 2026-10-25: Unicode organization names made the workspace unavailable
+
+- Symptom: a valid AuthFortress tenant name containing 65–128 emoji caused the
+  membership list and every scoped dashboard read to fail with 502.
+- Cause: `tenantView` retained a 128 UTF-16-unit guard despite AuthFortress
+  `TenantCreate` and PostgreSQL `VARCHAR(128)` counting Unicode code points.
+- Fix: share the bounded 128-code-point display-name guard between tenant and
+  bot projections. Generic text, credentials and transport limits are unchanged.
+- Detection: the HTTP regression `tenant names retain the issuer Unicode code
+  point limit across list and scoped reads` reproduced 502 before the fix and
+  verifies 65/128 acceptance, 129/empty rejection and denial before sink access.
+
 ## 2026-10-25: Dashboard bot names counted UTF-16 units instead of characters
 
 - Symptom: the unshipped Bots BFF rejected a valid backend name with 65–128

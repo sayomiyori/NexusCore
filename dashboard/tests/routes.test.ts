@@ -343,6 +343,34 @@ test("foreign tenant denial occurs before any event or log query", async () => {
   assert(!JSON.stringify(await response.json()).includes("private"));
 });
 
+test("tenant names retain the issuer Unicode code point limit across list and scoped reads", async () => {
+  const original = safeTenant.name;
+  try {
+    for (const length of [65, 128]) {
+      safeTenant.name = "😀".repeat(length);
+      const listed = await tenants(request("/api/tenants"));
+      assert.equal(listed.status, 200);
+      assert.equal((await listed.json()).items[0].name, safeTenant.name);
+      const scoped = await overview(request(`/api/overview?tenant=${tenant}`));
+      assert.equal(scoped.status, 200);
+      assert.equal((await scoped.json()).tenant.name, safeTenant.name);
+    }
+    for (const name of ["😀".repeat(129), "a".repeat(129), ""]) {
+      safeTenant.name = name;
+      assert.equal((await tenants(request("/api/tenants"))).status, 502);
+      calls = [];
+      assert.equal(
+        (await overview(request(`/api/overview?tenant=${tenant}`))).status,
+        502,
+      );
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].path, `/api/v1/tenants/${tenant}`);
+    }
+  } finally {
+    safeTenant.name = original;
+  }
+});
+
 test("overview deduplicates both receivers and never exports raw previews/payloads", async () => {
   const response = await overview(request(`/api/overview?tenant=${tenant}`));
   const data = await response.json();
