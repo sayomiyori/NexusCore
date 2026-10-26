@@ -843,6 +843,11 @@ input {
   font-size: 30px;
   overflow-wrap: anywhere;
 }
+.configuration .metric dd {
+  margin: 10px 0 0;
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
 @media (min-width: 1500px) {
   .content {
     padding-top: 55px;

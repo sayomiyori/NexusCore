@@ -1,6 +1,6 @@
 # NexusCore dashboard
 
-Opt-in tenant Overview, Bots, Events, Usage and AI jobs using existing AuthFortress,
+Opt-in tenant Overview, Bots, Events, Usage, AI jobs and AI Configuration using existing AuthFortress,
 WebHook Manager, AgentHub, EventPipe query and PipeWatch HTTP contracts. Overview displays up to ten recent
 safe observations and authorized receiver availability. Bots displays a paged
 configuration inventory; Usage reads one active bot's recorded token/cost
@@ -63,6 +63,14 @@ section, Refresh and bot-page changes clear/abort prior results. Reads do not
 execute, retry, reconcile or resend jobs. Raw envelopes, answers, errors,
 provider/model and worker claims are excluded.
 
+AI Configuration explicitly loads shared operator-managed Telegram AI process
+settings for an authorized active bot: provider, selected model (or Not selected)
+and processing flag. It does not store bot overrides or edit/enable AI. The flag
+does not prove credentials, workers or provider connectivity. No key-presence
+checks, secrets, prompts or service URLs are exposed. The existing AgentHub read
+origin requires the new `/ai/configuration` endpoint; an older backend shows an
+explicit unavailable error. Bot/page/scope/section/Refresh changes clear results.
+
 To check and run the optimized build:
 
 ```powershell
@@ -124,11 +132,13 @@ Bots contract: [dashboard-bots.md](../specs/dashboard-bots.md).
 Events contract: [dashboard-events.md](../specs/dashboard-events.md).
 Usage contract: [dashboard-usage.md](../specs/dashboard-usage.md).
 AI jobs contract: [dashboard-jobs.md](../specs/dashboard-jobs.md).
+AI Configuration contract: [dashboard-ai-configuration.md](../specs/dashboard-ai-configuration.md).
 Verification: [Overview acceptance](../docs/dashboard-overview-2026-10-23.md),
 [Bots acceptance](../docs/dashboard-bots-2026-10-25.md),
 [Events acceptance](../docs/dashboard-events-2026-10-25.md),
 [Usage acceptance](../docs/dashboard-usage-2026-10-25.md),
-[AI jobs acceptance](../docs/dashboard-jobs-2026-10-25.md).
+[AI jobs acceptance](../docs/dashboard-jobs-2026-10-25.md),
+[AI Configuration acceptance](../docs/dashboard-configuration-2026-10-26.md).
 
 ![Verified synthetic tenant Overview](../docs/images/dashboard-overview-2026-10-23.png)
 
@@ -139,3 +149,5 @@ Verification: [Overview acceptance](../docs/dashboard-overview-2026-10-23.md),
 ![Verified synthetic per-bot Usage](../docs/images/dashboard-usage-2026-10-25.png)
 
 ![Verified synthetic per-bot AI jobs](../docs/images/dashboard-jobs-2026-10-25.png)
+
+![Verified synthetic shared AI configuration](../docs/images/dashboard-configuration-2026-10-26.png)
