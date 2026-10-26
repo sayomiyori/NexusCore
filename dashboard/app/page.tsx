@@ -35,6 +35,7 @@ export default function Page() {
     jobs: "AI jobs",
     configuration: "AI Configuration",
   }[selection.view];
+  const [savingSettings, setSavingSettings] = useState(false);
   const [data, setData] = useState<Overview | BotPage | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
@@ -294,7 +295,11 @@ export default function Page() {
                   </label>
                 </>
               )}
-              <button type="submit" className="primary" disabled={busy}>
+              <button
+                type="submit"
+                className="primary"
+                disabled={busy || savingSettings}
+              >
                 {busy
                   ? "Please wait…"
                   : mfa
@@ -306,7 +311,7 @@ export default function Page() {
                 <button
                   type="button"
                   className="text-button"
-                  disabled={busy}
+                  disabled={busy || savingSettings}
                   onClick={() => {
                     setMfa(false);
                     setError("");
@@ -334,7 +339,7 @@ export default function Page() {
           Organization
           <select
             value={selected}
-            disabled={busy || !tenants.length}
+            disabled={busy || savingSettings || !tenants.length}
             onChange={(event) => choose(event.target.value)}
           >
             {!tenants.length && <option value="">No organizations</option>}
@@ -349,7 +354,7 @@ export default function Page() {
           <button
             type="button"
             className="text-button"
-            disabled={busy}
+            disabled={busy || savingSettings}
             onClick={moreTenants}
           >
             Load more organizations
@@ -369,7 +374,7 @@ export default function Page() {
             <button
               key={view}
               type="button"
-              disabled={busy}
+              disabled={busy || savingSettings}
               className={`nav-item${selection.view === view ? " nav-active" : ""}`}
               aria-current={selection.view === view ? "page" : undefined}
               onClick={() => choose(selected, view)}
@@ -402,16 +407,22 @@ export default function Page() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <span className="read-only">READ ONLY</span>
+          <span className="read-only">
+            {selection.view === "configuration"
+              ? "MODEL SETTINGS"
+              : "READ ONLY"}
+          </span>
           <p>
             Observe your workspace.
             <br />
-            Business data stays unchanged.
+            {selection.view === "configuration"
+              ? "Saving requires owner access."
+              : "Business data stays unchanged."}
           </p>
           <button
             type="button"
             className="signout"
-            disabled={busy}
+            disabled={busy || savingSettings}
             onClick={signOut}
           >
             Sign out <span aria-hidden="true">↗</span>
@@ -432,7 +443,7 @@ export default function Page() {
               <h1>{title}</h1>
               <p>
                 {selection.view === "configuration"
-                  ? "Shared AI configuration for "
+                  ? "Tenant and bot AI configuration for "
                   : selection.view === "jobs"
                     ? "Stored job metadata for "
                     : selection.view === "usage"
@@ -446,7 +457,7 @@ export default function Page() {
             <button
               type="button"
               className="refresh"
-              disabled={pending || busy || !selected}
+              disabled={pending || busy || savingSettings || !selected}
               onClick={() => {
                 choose(selected);
               }}
@@ -636,6 +647,7 @@ export default function Page() {
           )}
           {data && "items" in data && selection.view === "configuration" && (
             <Configuration
+              onSaving={setSavingSettings}
               data={data}
               canFirst={Boolean(selection.cursor)}
               onFirst={() => choose(selected, "configuration")}

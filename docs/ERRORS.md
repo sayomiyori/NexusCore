@@ -1,5 +1,23 @@
 # Verification tooling errors
 
+## 2026-10-26: Unshipped settings BFF accepted an unconfirmed write and invalid inheritance
+
+- Symptom: an upstream200 with a GET-shaped revision0 could make the editor
+  report success for a requested write; a null saved model could claim its own
+  target as the effective source. A scope array could pass string coercion.
+- Cause: safe read validation did not validate the write acknowledgement against
+  its requested next revision/model or complete inheritance/type invariants.
+- Fix: require exact requested model and expected_revision+1 on PUT, reject own
+  effective scope when inheriting, and require a string enum without coercion.
+  Failed acknowledgement is502 and requires reload; never retry the mutation.
+- Detection: independent real HTTP handler probes reproduced200 before fixes;
+  the acknowledgement/inheritance/malformed-source regressions require502 and
+  exactly one upstream PUT. No production write was involved.
+- Related unshipped editor issue: an unescaped slash made the native HTML
+  pattern invalid with the browser's v flag. A local identifier guard now
+  validates before saving, alongside BFF/backend validation. Actual browser
+  invalid-input and zero-console-error checks passed after removal.
+
 ## 2026-10-25: Stored dashboard timestamps normalized impossible calendar dates
 
 - Symptom: the unshipped Jobs BFF accepted February 30 / April 31 from a source

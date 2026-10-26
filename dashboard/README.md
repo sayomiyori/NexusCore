@@ -31,7 +31,8 @@ Select an authorized organization and switch between Overview and Bots. Refresh
 returns to the first page. Bots uses Next page/First page and up to 50 records
 per response, without claiming a total. Names, activity flags and stored webhook
 states come from scoped configuration reads; no live Telegram health request is
-made. The views have no business mutation controls or automatic polling.
+made. Overview, Bots, Events, Usage and AI jobs have no business mutation controls
+or automatic polling. AI Configuration supports owner-only model changes.
 
 Events inspects the same ten merged observations as Overview, with full event/
 bot IDs, UTC times, receiver evidence and observed attempt counts. Kind,
@@ -63,13 +64,18 @@ section, Refresh and bot-page changes clear/abort prior results. Reads do not
 execute, retry, reconcile or resend jobs. Raw envelopes, answers, errors,
 provider/model and worker claims are excluded.
 
-AI Configuration explicitly loads shared operator-managed Telegram AI process
-settings for an authorized active bot: provider, selected model (or Not selected)
-and processing flag. It does not store bot overrides or edit/enable AI. The flag
-does not prove credentials, workers or provider connectivity. No key-presence
-checks, secrets, prompts or service URLs are exposed. The existing AgentHub read
-origin requires the new `/ai/configuration` endpoint; an older backend shows an
-explicit unavailable error. Bot/page/scope/section/Refresh changes clear results.
+AI Configuration loads tenant defaults or active bot overrides. Tenant defaults
+work without a bot. Effective precedence is bot > tenant > operator platform;
+provider stays Groq. Load settings before editing. Owners may Save model or
+Use inherited model; members read only. Saves use optimistic revisions and
+atomic audit receipts. Conflicts and unconfirmed writes require reload, without
+automatic retry. Scope/navigation controls are locked while saving. Changes
+apply to future first job claims; retry retains the frozen model.
+The operator processing flag stays read-only and does not prove credentials,
+workers or connectivity. No keys, key-presence probes, prompts or service URLs.
+AgentHub needs the new `/ai/settings` endpoints and clean migration003_ai_settings;
+never migrate the main deployment or merge foreign migration WIP implicitly.
+Bot/page/scope/section/Refresh changes clear loaded settings and local drafts.
 
 To check and run the optimized build:
 
@@ -124,7 +130,7 @@ only numeric IPv4 loopback, not public hosts or forwarded headers.
   observations and abort stale reads. Logout clears cookies and requests issuer
   revocation; failures say when issuer sign-out could not be confirmed.
 
-No registration, OAuth, refresh workflow, bot/AI editing, billing, Telegram alerts,
+No registration, OAuth, refresh workflow, bot editing, credential/processing activation, billing, Telegram alerts,
 public deployment or main-stack activation in this increment.
 
 Contract: [dashboard-overview.md](../specs/dashboard-overview.md).
@@ -133,12 +139,15 @@ Events contract: [dashboard-events.md](../specs/dashboard-events.md).
 Usage contract: [dashboard-usage.md](../specs/dashboard-usage.md).
 AI jobs contract: [dashboard-jobs.md](../specs/dashboard-jobs.md).
 AI Configuration contract: [dashboard-ai-configuration.md](../specs/dashboard-ai-configuration.md).
+Saved settings contract: [tenant-ai-settings.md](../specs/tenant-ai-settings.md).
 Verification: [Overview acceptance](../docs/dashboard-overview-2026-10-23.md),
 [Bots acceptance](../docs/dashboard-bots-2026-10-25.md),
 [Events acceptance](../docs/dashboard-events-2026-10-25.md),
 [Usage acceptance](../docs/dashboard-usage-2026-10-25.md),
 [AI jobs acceptance](../docs/dashboard-jobs-2026-10-25.md),
 [AI Configuration acceptance](../docs/dashboard-configuration-2026-10-26.md).
+
+Saved settings verification: [tenant/bot settings acceptance](../docs/tenant-ai-settings-2026-10-26.md).
 
 ![Verified synthetic tenant Overview](../docs/images/dashboard-overview-2026-10-23.png)
 
@@ -151,3 +160,5 @@ Verification: [Overview acceptance](../docs/dashboard-overview-2026-10-23.md),
 ![Verified synthetic per-bot AI jobs](../docs/images/dashboard-jobs-2026-10-25.png)
 
 ![Verified synthetic shared AI configuration](../docs/images/dashboard-configuration-2026-10-26.png)
+
+![Verified synthetic saved bot settings](../docs/images/dashboard-settings-2026-10-26.png)

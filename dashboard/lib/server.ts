@@ -157,6 +157,7 @@ export function cookie(
 
 export async function body(
   request: NextRequest,
+  flatKeys?: readonly string[],
 ): Promise<Record<string, unknown>> {
   if (
     !/^application\/json(?:;|$)/i.test(
@@ -183,7 +184,21 @@ export async function body(
       chunks.push(result.value);
     }
     if (expired) throw new ApiError(400);
-    return record(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    const raw = Buffer.concat(chunks).toString("utf8");
+    const value = record(JSON.parse(raw));
+    if (flatKeys) {
+      // Settings are a flat object; count decoded keys before JSON duplicate collapse.
+      const keys = [...raw.matchAll(/"(?:\\.|[^"\\])*"\s*:/g)].map((match) =>
+        JSON.parse(match[0].slice(0, match[0].lastIndexOf(":"))),
+      );
+      if (
+        keys.length !== flatKeys.length ||
+        new Set(keys).size !== keys.length ||
+        keys.some((key) => !flatKeys.includes(key))
+      )
+        throw new ApiError(400);
+    }
+    return value;
   } catch {
     await reader.cancel().catch(() => {});
     throw new ApiError(400);
@@ -199,6 +214,7 @@ export function requestJson(
   token?: string,
   tenant?: string,
   payload?: unknown,
+  method?: "PUT",
 ): Promise<unknown> {
   const target = privateOrigin(base) + path;
   if (!path.startsWith("/api/v1/") || path.includes("#"))
@@ -208,7 +224,7 @@ export function requestJson(
     const req = (target.startsWith("https:") ? https : http).request(
       target,
       {
-        method: encoded === undefined ? "GET" : "POST",
+        method: method || (encoded === undefined ? "GET" : "POST"),
         agent: false,
         headers: {
           Accept: "application/json",
@@ -250,7 +266,7 @@ export function requestJson(
               new ApiError(
                 status === 422
                   ? 400
-                  : [400, 401, 403, 404, 429].includes(status)
+                  : [400, 401, 403, 404, 409, 429].includes(status)
                     ? status
                     : 502,
               ),
