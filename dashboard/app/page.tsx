@@ -8,12 +8,20 @@ import type { Overview, Tenant } from "../lib/overview.ts";
 import Configuration from "./configuration.tsx";
 import Events from "./events.tsx";
 import Jobs from "./jobs.tsx";
+import Knowledge from "./knowledge.tsx";
 import Usage from "./usage.tsx";
 
 type TenantPage = { items: Tenant[]; hasMore: boolean; offset: number };
 type Selection = {
   tenant: string;
-  view: "overview" | "bots" | "events" | "usage" | "jobs" | "configuration";
+  view:
+    | "overview"
+    | "bots"
+    | "events"
+    | "usage"
+    | "jobs"
+    | "configuration"
+    | "knowledge";
   cursor: string | null;
 };
 export default function Page() {
@@ -34,8 +42,10 @@ export default function Page() {
     usage: "Usage",
     jobs: "AI jobs",
     configuration: "AI Configuration",
+    knowledge: "Knowledge Base",
   }[selection.view];
   const [savingSettings, setSavingSettings] = useState(false);
+  const [knowledgeRefresh, setKnowledgeRefresh] = useState(0);
   const [data, setData] = useState<Overview | BotPage | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
@@ -107,6 +117,7 @@ export default function Page() {
   useEffect(() => {
     const tenant = selection.tenant;
     if (!tenant || screen !== "overview") return;
+    if (selection.view === "knowledge") return;
     const controller = new AbortController();
     query.current = controller;
     const botView = ["bots", "usage", "jobs", "configuration"].includes(
@@ -194,7 +205,9 @@ export default function Page() {
     setError(message);
   }
 
-  const pending = Boolean(selected && !data && !error);
+  const pending = Boolean(
+    selected && selection.view !== "knowledge" && !data && !error,
+  );
   const status = error ? (
     <p role="alert" className="notice error">
       {error}
@@ -369,6 +382,7 @@ export default function Page() {
               "usage",
               "jobs",
               "configuration",
+              "knowledge",
             ] as const
           ).map((view) => (
             <button
@@ -398,6 +412,7 @@ export default function Page() {
                   usage: "Usage",
                   jobs: "AI jobs",
                   configuration: "AI Configuration",
+                  knowledge: "Knowledge Base",
                 }[view]
               }
               {selection.view === view && (
@@ -442,16 +457,21 @@ export default function Page() {
               <span className="eyebrow">WORKSPACE AT A GLANCE</span>
               <h1>{title}</h1>
               <p>
-                {selection.view === "configuration"
-                  ? "Tenant and bot AI configuration for "
-                  : selection.view === "jobs"
-                    ? "Stored job metadata for "
-                    : selection.view === "usage"
-                      ? "Recorded usage for "
-                      : selection.view === "bots"
-                        ? "Bot configuration for "
-                        : "Recent observations across "}
-                {data?.tenant.name || "your organization"}.
+                {selection.view === "knowledge"
+                  ? "Documents for "
+                  : selection.view === "configuration"
+                    ? "Tenant and bot AI configuration for "
+                    : selection.view === "jobs"
+                      ? "Stored job metadata for "
+                      : selection.view === "usage"
+                        ? "Recorded usage for "
+                        : selection.view === "bots"
+                          ? "Bot configuration for "
+                          : "Recent observations across "}
+                {data?.tenant.name ||
+                  tenants.find((item) => item.id === selected)?.name ||
+                  "your organization"}
+                .
               </p>
             </div>
             <button
@@ -459,6 +479,8 @@ export default function Page() {
               className="refresh"
               disabled={pending || busy || savingSettings || !selected}
               onClick={() => {
+                if (selection.view === "knowledge")
+                  setKnowledgeRefresh((value) => value + 1);
                 choose(selected);
               }}
             >
@@ -466,6 +488,13 @@ export default function Page() {
             </button>
           </div>
           {status}
+          {selected && selection.view === "knowledge" && (
+            <Knowledge
+              key={`${selected}-${knowledgeRefresh}`}
+              tenant={selected}
+              onExpired={expire}
+            />
+          )}
           {!tenants.length ? (
             <section className="empty panel">
               <h2>No organizations yet</h2>

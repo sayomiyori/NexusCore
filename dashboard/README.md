@@ -96,6 +96,12 @@ only numeric IPv4 loopback, not public hosts or forwarded headers.
 
 ## Boundaries
 
+Knowledge Base lists tenant-scoped document metadata in pages of 50. A full
+page may be followed by an empty page; records may shift between offset pages
+when documents are added or removed. The issuer and AgentHub authorize each
+read. AgentHub requires `PLATFORM_TENANT_ENABLED=true` on the isolated service;
+enabling that feature on an existing deployment is a separate operation. The
+view does not upload, delete, expose file paths or run embeddings.
 - Access and temporary 2FA credentials stay in HttpOnly, SameSite=Strict cookies.
   The server discards refresh credentials; access cookies expire after 15 minutes.
   Sign in again when the issuer session expires. Existing issuer rate limits,
