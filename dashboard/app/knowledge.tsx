@@ -77,6 +77,13 @@ export default function Knowledge({
             </button>
             <button
               type="button"
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - 50))}
+            >
+              Previous page
+            </button>
+            <button
+              type="button"
               disabled={page.nextOffset === null}
               onClick={() => setOffset(page.nextOffset ?? 0)}
             >
