@@ -34,6 +34,7 @@ IMAGES = {
     "postgres": "pgvector/pgvector:pg16",
     "redis": "redis:7-alpine",
 }
+AGENT_REVISIONS = ("003_tenant_resources", "004_merge_ai_resources")
 KINDS = {"postgres": "postgres", "redis": "redis", "callback": "web",
          "auth_service": "auth", "webhook_service": "web", "webhook_worker": "web",
          "agent_service": "agent", "agent_worker": "agent"}
@@ -357,7 +358,10 @@ def validate_config(config, project, images, controlled_ai=False, scanners=False
 
 
 class Fixture:
-    def __init__(self, images, *, controlled_ai=False, scanners=False, config_factory=smoke_config):
+    def __init__(self, images, *, controlled_ai=False, scanners=False, config_factory=smoke_config,
+                 agent_revision=AGENT_REVISIONS[0]):
+        require(agent_revision in AGENT_REVISIONS, "Unsupported AgentHub revision")
+        self.agent_revision = agent_revision
         self.controlled_ai = controlled_ai
         self.scanners = (AI_SCANNERS if controlled_ai else LEGACY_SCANNERS) if scanners else {}
         self.kinds = {**(AI_KINDS if controlled_ai else KINDS), **{name: role[0] for name, role in self.scanners.items()}}
@@ -520,7 +524,7 @@ print(json.dumps(request(data['url'],data['method'],payload,data['headers'],allo
             uid = self.compose("exec", "-T", name, "python", "-c", "import os; print(os.getuid())")
             require(uid == "10001", "Application fixture UID mismatch")
         versions = {}
-        for database, expected in (("auth_test", {"004_tenants"}), ("webhook_test", {"8f3b1c6d2a90", "c42d8e91a730"}), ("agent_test", {"003_tenant_resources"})):
+        for database, expected in (("auth_test", {"004_tenants"}), ("webhook_test", {"8f3b1c6d2a90", "c42d8e91a730"}), ("agent_test", {self.agent_revision})):
             version = self.compose("exec", "-T", "postgres", "psql", "-U", "smoke", "-d", database, "-At", "-c", "SELECT version_num FROM alembic_version")
             require(set(version.splitlines()) == expected, "Fixture migration head mismatch")
             versions[database] = sorted(version.splitlines())
@@ -773,6 +777,8 @@ def main(argv=None):
     parser.add_argument("--receiver", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--scanners", action="store_true", help="Verify the permanent legacy scanner with owned outages/restarts")
     parser.add_argument("--load", action="store_true", help="Probe owned APIs for 5 seconds each with 4 clients and p95 <= 500 ms")
+    parser.add_argument("--agent-revision", choices=AGENT_REVISIONS, default=AGENT_REVISIONS[0],
+                        help="Expected AgentHub migration head in the selected image")
     for kind, image in IMAGES.items():
         option = "webhook" if kind == "web" else kind
         parser.add_argument(f"--{option}-image", default=image)
@@ -788,7 +794,7 @@ def main(argv=None):
             server.server_close()
         return
     images = {kind: getattr(args, ("webhook" if kind == "web" else kind) + "_image") for kind in IMAGES}
-    fixture = Fixture(images, scanners=args.scanners)
+    fixture = Fixture(images, scanners=args.scanners, agent_revision=args.agent_revision)
     report = {"project": fixture.project, "images": fixture.images, "external_calls_enabled": False}
     try:
         fixture.start()

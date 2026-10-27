@@ -41,6 +41,26 @@ def resolved_config(scanners=False):
 
 
 class StackSmokeTests(unittest.TestCase):
+    def test_proof_requires_exact_selected_agent_revision(self):
+        fixture = object.__new__(smoke.Fixture)
+        fixture.controlled_ai = True
+        fixture.agent_revision = "004_merge_ai_resources"
+        fixture.kinds = {"postgres": "postgres", "redis": "redis", "agent_service": "agent"}
+        fixture.scanners = {}
+        fixture.owned = Mock(return_value={name: {"State": {"Running": True, "OOMKilled": False}}
+                                           for name in fixture.kinds})
+        versions = {"auth_test": "004_tenants", "webhook_test": "8f3b1c6d2a90\nc42d8e91a730",
+                    "agent_test": "004_merge_ai_resources"}
+
+        def compose(*args):
+            return versions[args[7]] if args[3] == "psql" else "10001"
+
+        fixture.compose = Mock(side_effect=compose)
+        self.assertEqual(fixture.proof()["revisions"]["agent_test"], ["004_merge_ai_resources"])
+        versions["agent_test"] = "003_tenant_resources"
+        with self.assertRaises(smoke.VerificationError):
+            fixture.proof()
+
     def test_load_probe_mounts_require_exact_readonly_sources_and_api_roles(self):
         good = resolved_config()
         smoke.validate_config(good, PROJECT, smoke.IMAGES)

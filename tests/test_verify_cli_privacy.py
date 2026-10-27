@@ -15,8 +15,10 @@ from scripts import verify_telegram_edge as edge
 CASES = (
     (metrics, (['synthetic-private-role'], ['auth_service', '--synthetic-private-option'],
                ['auth_service', 'synthetic-private-extra'])),
-    (smoke, (['--synthetic-private-option'], ['synthetic-private-extra'], ['--auth-image'])),
-    (ai, (['--synthetic-private-option'], ['synthetic-private-extra'], ['--agent-image'])),
+    (smoke, (['--synthetic-private-option'], ['synthetic-private-extra'], ['--auth-image'],
+             ['--agent-revision', 'synthetic-private-revision'])),
+    (ai, (['--synthetic-private-option'], ['synthetic-private-extra'], ['--agent-image'],
+          ['--agent-revision', 'synthetic-private-revision'])),
     (edge, (['--python-image', 'synthetic-image', '--synthetic-private-option'],
             ['--python-image', 'synthetic-image', 'synthetic-private-extra'], ['--python-image'])),
 )

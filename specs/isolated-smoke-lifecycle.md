@@ -40,3 +40,9 @@ when application stop fails. Disable scanner restart before sending stop.
 Final proof must reject OOM and nonzero application/infrastructure exit codes;
 scanners may exit 0 or their expected SIGTERM code 143. A forced 137 must fail
 the receipt rather than masquerade as a successful stopped fixture.
+
+The selected AgentHub image must match one explicitly expected supported
+migration head. The default remains 003_tenant_resources; callers testing the
+unified image must select 004_merge_ai_resources. Both controlled and standalone
+fixtures must verify the same exact requested head; unknown values fail before
+creating any fixture resources.

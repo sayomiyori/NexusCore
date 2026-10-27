@@ -34,6 +34,20 @@ def controlled_config(scanners=False):
 
 
 class ControlledAISmokeTests(unittest.TestCase):
+    def test_expected_agent_revision_is_forwarded_to_both_fixtures(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(ai.smoke, "Fixture") as boundary, patch.object(ai, "verify", return_value={}), \
+                patch.object(ai.smoke, "main") as legacy, patch.object(ai.smoke, "verify_metrics"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            fixture = boundary.return_value
+            fixture.project, fixture.directory, fixture.images = PROJECT, Path(directory), smoke.IMAGES
+            fixture.environment, fixture.callback_origin = {}, "http://192.168.1.3:8000"
+            fixture.proof.return_value = {}
+            ai.main(["--agent-revision", "004_merge_ai_resources"])
+            self.assertEqual(boundary.call_args.kwargs["agent_revision"], "004_merge_ai_resources")
+            args = legacy.call_args.args[0]
+            self.assertEqual(args[args.index("--agent-revision") + 1], "004_merge_ai_resources")
+
     def test_load_flag_is_forwarded_to_legacy_only_after_ai_stops(self):
         for enabled in (False, True):
             with self.subTest(enabled=enabled), tempfile.TemporaryDirectory() as directory, \
@@ -51,6 +65,9 @@ class ControlledAISmokeTests(unittest.TestCase):
 
                 legacy.side_effect = second
                 ai.main(["--scanners", *(["--load"] if enabled else [])])
+                self.assertEqual(boundary.call_args.kwargs["agent_revision"], "003_tenant_resources")
+                self.assertEqual(legacy.call_args.args[0][legacy.call_args.args[0].index("--agent-revision") + 1],
+                                 "003_tenant_resources")
                 self.assertEqual(load.call_count, int(enabled))
                 self.assertEqual("--load" in legacy.call_args.args[0], enabled)
                 self.assertIn("--scanners", legacy.call_args.args[0])

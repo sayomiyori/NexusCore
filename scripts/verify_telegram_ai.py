@@ -422,6 +422,8 @@ def main(argv=None):
     parser.add_argument("--receiver", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--scanners", action="store_true", help="Verify permanent recovery loops with owned outages/restarts")
     parser.add_argument("--load", action="store_true", help="Probe owned APIs with the fixed bounded HTTP load profile")
+    parser.add_argument("--agent-revision", choices=smoke.AGENT_REVISIONS, default=smoke.AGENT_REVISIONS[0],
+                        help="Expected AgentHub migration head in the selected image")
     for kind, image in smoke.IMAGES.items():
         parser.add_argument(f"--{'webhook' if kind == 'web' else kind}-image", default=image)
     args = parser.parse_args(argv)
@@ -435,7 +437,8 @@ def main(argv=None):
             server.server_close()
         return
     images = {kind: getattr(args, ("webhook" if kind == "web" else kind) + "_image") for kind in smoke.IMAGES}
-    fixture = smoke.Fixture(images, controlled_ai=True, scanners=args.scanners, config_factory=ai_config)
+    fixture = smoke.Fixture(images, controlled_ai=True, scanners=args.scanners, config_factory=ai_config,
+                            agent_revision=args.agent_revision)
     fixture.environment.update({key: secrets.token_hex(32) for key in ("AI_SERVICE_KEY", "AI_CONTEXT_KEY", "AI_INGRESS_KEY", "AI_REPLY_KEY")},
                                AI_BOT_KEY=Fernet.generate_key().decode(), SMOKE_CALLBACK_ORIGIN="http://127.0.0.1:8000")
     report = {"project": fixture.project, "images": fixture.images, "external_calls_enabled": False}
@@ -471,6 +474,7 @@ def main(argv=None):
             print("RECEIPT: " + str(artifact), flush=True)
     # Keep this second acceptance sequential on the fixed-memory host.
     smoke.main([*(["--scanners"] if args.scanners else []), *(["--load"] if args.load else []),
+                "--agent-revision", args.agent_revision,
                 *[option for kind in images for option in (f"--{'webhook' if kind == 'web' else kind}-image", images[kind])]])
 
 

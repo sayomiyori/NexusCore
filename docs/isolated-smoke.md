@@ -12,6 +12,14 @@ Use the existing WebHook Manager virtualenv and locally cached service images:
 ../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_telegram_ai.py --scanners
 ```
 
+To test the unified AgentHub image, provide its local image tag and the exact
+merged head. The default head remains `003_tenant_resources` for the existing
+cached image; each fixture requires an exact match and rejects unknown heads.
+
+```powershell
+../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_telegram_ai.py --scanners --agent-image 'YOUR_LOCAL_UNIFIED_IMAGE' --agent-revision 004_merge_ai_resources
+```
+
 The AI command runs its controlled chain, stops it, then runs a separate
 standalone fixture. `--scanners` uses the real permanent recovery CLI entrypoints
 in both fixtures. The standalone scanner can also be checked alone:
