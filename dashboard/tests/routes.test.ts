@@ -46,6 +46,7 @@ let logoutDown = false,
   oversized = false,
   mismatched = false;
 let tenantRows: unknown = [safeTenant];
+let membershipStatus = 200;
 
 const server = http.createServer((req, res) => {
   let raw = "";
@@ -88,7 +89,8 @@ const server = http.createServer((req, res) => {
       return;
     }
     assert.equal(req.headers.authorization, "Bearer synthetic-access");
-    if (path.startsWith("/api/v1/tenants?")) return send(tenantRows);
+    if (path.startsWith("/api/v1/tenants?"))
+      return send(tenantRows, membershipStatus);
     if (path.startsWith("/api/v1/tenants/"))
       return send(
         denied ? { private: "denied" } : safeTenant,
@@ -170,6 +172,7 @@ before(async () => {
 beforeEach(() => {
   calls = [];
   tenantRows = [safeTenant];
+  membershipStatus = 200;
   mfa =
     denied =
     epDown =
@@ -366,6 +369,50 @@ test("membership pages preserve roles, bound results and reject invalid entries"
   assert.equal((await tenants(request("/api/tenants"))).status, 502);
   tenantRows = Array.from({ length: 51 }, () => safeTenant);
   assert.equal((await tenants(request("/api/tenants"))).status, 502);
+});
+
+test("refresh replaces membership snapshots and propagates issuer failures without stale rows", async () => {
+  const read = () => tenants(request("/api/tenants?offset=0"));
+  assert.equal((await (await read()).json()).items[0].role, "owner");
+  tenantRows = [{ ...safeTenant, role: "member" }];
+  assert.equal((await (await read()).json()).items[0].role, "member");
+  tenantRows = [];
+  assert.deepEqual((await (await read()).json()).items, []);
+  for (const status of [401, 403, 503]) {
+    membershipStatus = status;
+    tenantRows = { private: "issuer-error-must-not-escape" };
+    const response = await read();
+    assert.equal(response.status, status === 503 ? 502 : status);
+    const body = await response.json();
+    assert.equal(body.items, undefined);
+    assert(!JSON.stringify(body).includes("issuer-error-must-not-escape"));
+  }
+  assert(
+    calls.every((call) => call.path === "/api/v1/tenants?offset=0&limit=50"),
+  );
+});
+
+test("last permitted membership page cannot advertise an invalid next offset", async () => {
+  tenantRows = Array.from({ length: 50 }, (_, index) => ({
+    ...safeTenant,
+    id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+  }));
+  for (const offset of [99951, 99999, 100000]) {
+    const response = await tenants(request(`/api/tenants?offset=${offset}`));
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).hasMore, false);
+  }
+  assert.equal(
+    (await (await tenants(request("/api/tenants?offset=99950"))).json())
+      .hasMore,
+    true,
+  );
+  const count = calls.length;
+  assert.equal(
+    (await tenants(request("/api/tenants?offset=100050"))).status,
+    400,
+  );
+  assert.equal(calls.length, count);
 });
 
 test("foreign tenant denial occurs before any event or log query", async () => {

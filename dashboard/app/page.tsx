@@ -51,10 +51,14 @@ export default function Page() {
   const [data, setData] = useState<Overview | BotPage | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
+  const [membershipState, setMembershipState] = useState<
+    "loading" | "ready" | "error"
+  >("loading");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [mfa, setMfa] = useState(false);
   const query = useRef<AbortController | null>(null);
+  const membershipQuery = useRef<AbortController | null>(null);
   const codeInput = useRef<HTMLInputElement>(null);
 
   const choose = useCallback(
@@ -72,8 +76,12 @@ export default function Page() {
   );
 
   const expire = useCallback(() => {
+    membershipQuery.current?.abort();
     choose("");
     setTenants([]);
+    setHasMore(false);
+    setOffset(0);
+    setBusy(false);
     setScreen("login");
     setMfa(false);
     setError("Your session expired. Sign in again.");
@@ -93,6 +101,7 @@ export default function Page() {
         ]);
       setHasMore(page.hasMore);
       setOffset(page.offset + 50);
+      setMembershipState("ready");
       setScreen("overview");
     },
     [choose],
@@ -100,8 +109,11 @@ export default function Page() {
 
   useEffect(() => {
     const controller = new AbortController();
+    membershipQuery.current = controller;
     api<TenantPage>("/api/tenants", { signal: controller.signal })
-      .then(receiveTenants)
+      .then((page) => {
+        if (!controller.signal.aborted) receiveTenants(page);
+      })
       .catch((reason) => {
         if (!controller.signal.aborted) {
           setScreen("login");
@@ -109,7 +121,10 @@ export default function Page() {
             setError("Unable to load your workspace. Try signing in again.");
         }
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      membershipQuery.current?.abort();
+    };
   }, [receiveTenants]);
 
   useEffect(() => {
@@ -174,21 +189,44 @@ export default function Page() {
     }
   }
 
-  async function moreTenants() {
+  async function moreTenants(refresh = false) {
+    membershipQuery.current?.abort();
+    const controller = new AbortController();
+    membershipQuery.current = controller;
     setBusy(true);
     setError("");
+    if (refresh) {
+      choose("", "tenants");
+      setTenants([]);
+      setHasMore(false);
+      setOffset(0);
+      setMembershipState("loading");
+    }
     try {
-      receiveTenants(await api<TenantPage>(`/api/tenants?offset=${offset}`));
+      const page = await api<TenantPage>(
+        `/api/tenants?offset=${refresh ? 0 : offset}`,
+        { signal: controller.signal },
+      );
+      if (!controller.signal.aborted) receiveTenants(page);
     } catch (reason) {
+      if (controller.signal.aborted) return;
       if (reason instanceof RequestError && reason.status === 401) expire();
-      else setError("Unable to load more organizations. Try again.");
+      else {
+        if (refresh) setMembershipState("error");
+        setError(
+          refresh
+            ? "Unable to load organizations. Refresh to try again."
+            : "Unable to load more organizations. Try again.",
+        );
+      }
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
     }
   }
 
   async function signOut() {
     query.current?.abort();
+    membershipQuery.current?.abort();
     setBusy(true);
     let message = "";
     try {
@@ -373,7 +411,7 @@ export default function Page() {
             type="button"
             className="text-button"
             disabled={busy || savingSettings}
-            onClick={moreTenants}
+            onClick={() => moreTenants()}
           >
             Load more organizations
           </button>
@@ -486,20 +524,27 @@ export default function Page() {
                 .
               </p>
             </div>
-            {selection.view !== "tenants" && (
-              <button
-                type="button"
-                className="refresh"
-                disabled={pending || busy || savingSettings || !selected}
-                onClick={() => {
-                  if (selection.view === "knowledge")
-                    setKnowledgeRefresh((value) => value + 1);
-                  choose(selected);
-                }}
-              >
-                <span aria-hidden="true">↻</span> Refresh
-              </button>
-            )}
+            <button
+              type="button"
+              className="refresh"
+              disabled={
+                pending ||
+                busy ||
+                savingSettings ||
+                (selection.view !== "tenants" && !selected)
+              }
+              onClick={() => {
+                if (selection.view === "tenants") {
+                  void moreTenants(true);
+                  return;
+                }
+                if (selection.view === "knowledge")
+                  setKnowledgeRefresh((value) => value + 1);
+                choose(selected);
+              }}
+            >
+              <span aria-hidden="true">↻</span> Refresh
+            </button>
           </div>
           {status}
           {selection.view === "tenants" && tenants.length > 0 && (
@@ -549,7 +594,16 @@ export default function Page() {
               onExpired={expire}
             />
           )}
-          {!tenants.length ? (
+          {membershipState === "loading" ? (
+            <section className="empty panel" aria-live="polite">
+              <p role="status">Loading organizations…</p>
+            </section>
+          ) : membershipState === "error" ? (
+            <section className="empty panel">
+              <h2>Organizations unavailable</h2>
+              <p>Open Organizations and Refresh to try again.</p>
+            </section>
+          ) : !tenants.length ? (
             <section className="empty panel">
               <h2>No organizations yet</h2>
               <p>This account has no available tenant memberships.</p>

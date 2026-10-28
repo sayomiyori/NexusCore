@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       throw new ApiError(502);
     return reply({
       items,
-      hasMore: items.length === 50,
+      hasMore: items.length === 50 && Number(offset) + 50 <= 100000,
       offset: Number(offset),
     });
   } catch (error) {

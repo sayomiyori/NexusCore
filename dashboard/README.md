@@ -100,6 +100,11 @@ Organizations shows the loaded issuer membership pages and roles. Use the
 existing load-more control for additional pages; the list is a snapshot and
 does not establish current membership. Opening an organization checks access
 again through the existing scoped Overview request.
+Refresh clears the loaded membership pages and selection, then loads the first
+page again. Loading, failed refresh and an empty successful result are distinct.
+Use Refresh to retry a failure. The first returned organization becomes selected;
+load more pages again as needed. At the offset limit the loaded list remains a
+bounded snapshot, not a total count. Session expiry returns to sign-in.
 
 Knowledge Base lists tenant-scoped document metadata in pages of 50. A full
 page may be followed by an empty page; records may shift between offset pages
@@ -159,6 +164,8 @@ Verification: [Overview acceptance](../docs/dashboard-overview-2026-10-23.md),
 [AI Configuration acceptance](../docs/dashboard-configuration-2026-10-26.md).
 
 Saved settings verification: [tenant/bot settings acceptance](../docs/tenant-ai-settings-2026-10-26.md).
+
+Organizations refresh verification: [local acceptance](../docs/dashboard-organizations-2026-10-28.md).
 
 ![Verified synthetic tenant Overview](../docs/images/dashboard-overview-2026-10-23.png)
 

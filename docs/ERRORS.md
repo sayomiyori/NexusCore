@@ -1,5 +1,17 @@
 # Verification tooling errors
 
+## 2026-10-28: Membership pagination advertised a rejected next offset
+
+- Symptom: a full membership page at offset 99951 through 100000 advertised
+  another page whose offset exceeded the BFF's maximum and returned 400.
+- Cause: `hasMore` considered only the page length, without checking whether
+  the next offset was accepted by the same endpoint.
+- Fix: advertise more pages only when offset + 50 is at most 100000. This is
+  a bounded loaded snapshot, not a claim of complete membership coverage.
+- Detection: `last permitted membership page cannot advertise an invalid next
+  offset` failed before the fix. It covers 99950, 99951, 99999, 100000 and rejects
+  100050 before any issuer call.
+
 ## 2026-10-26: Unshipped settings BFF accepted an unconfirmed write and invalid inheritance
 
 - Symptom: an upstream200 with a GET-shaped revision0 could make the editor
