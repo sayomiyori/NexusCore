@@ -45,6 +45,7 @@ let mfa = false,
 let logoutDown = false,
   oversized = false,
   mismatched = false;
+let tenantRows: unknown = [safeTenant];
 
 const server = http.createServer((req, res) => {
   let raw = "";
@@ -87,7 +88,7 @@ const server = http.createServer((req, res) => {
       return;
     }
     assert.equal(req.headers.authorization, "Bearer synthetic-access");
-    if (path.startsWith("/api/v1/tenants?")) return send([safeTenant]);
+    if (path.startsWith("/api/v1/tenants?")) return send(tenantRows);
     if (path.startsWith("/api/v1/tenants/"))
       return send(
         denied ? { private: "denied" } : safeTenant,
@@ -168,6 +169,7 @@ before(async () => {
 });
 beforeEach(() => {
   calls = [];
+  tenantRows = [safeTenant];
   mfa =
     denied =
     epDown =
@@ -332,6 +334,38 @@ test("membership list is fresh, projected and missing credentials fail before up
     (await tenants(request("/api/tenants?offset=0&offset=50"))).status,
     400,
   );
+});
+
+test("membership pages preserve roles, bound results and reject invalid entries", async () => {
+  tenantRows = Array.from({ length: 50 }, (_, index) => ({
+    id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    name: `Synthetic organization ${index + 1}`,
+    role: index % 2 ? "member" : "owner",
+    private_metadata: "must-not-escape",
+  }));
+  const response = await tenants(request("/api/tenants?offset=50"));
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.offset, 50);
+  assert.equal(body.hasMore, true);
+  assert.equal(body.items.length, 50);
+  assert.equal(body.items[0].role, "owner");
+  assert.equal(body.items[1].role, "member");
+  assert(!JSON.stringify(body).includes("must-not-escape"));
+  assert.equal(calls[0].path, "/api/v1/tenants?offset=50&limit=50");
+
+  tenantRows = [];
+  assert.deepEqual(await (await tenants(request("/api/tenants"))).json(), {
+    items: [],
+    hasMore: false,
+    offset: 0,
+  });
+  tenantRows = [safeTenant, safeTenant];
+  assert.equal((await tenants(request("/api/tenants"))).status, 502);
+  tenantRows = [{ ...safeTenant, role: "admin" }];
+  assert.equal((await tenants(request("/api/tenants"))).status, 502);
+  tenantRows = Array.from({ length: 51 }, () => safeTenant);
+  assert.equal((await tenants(request("/api/tenants"))).status, 502);
 });
 
 test("foreign tenant denial occurs before any event or log query", async () => {

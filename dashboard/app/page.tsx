@@ -16,6 +16,7 @@ type Selection = {
   tenant: string;
   view:
     | "overview"
+    | "tenants"
     | "bots"
     | "events"
     | "usage"
@@ -37,6 +38,7 @@ export default function Page() {
   const selected = selection.tenant;
   const title = {
     overview: "Overview",
+    tenants: "Organizations",
     bots: "Bots",
     events: "Events",
     usage: "Usage",
@@ -117,7 +119,7 @@ export default function Page() {
   useEffect(() => {
     const tenant = selection.tenant;
     if (!tenant || screen !== "overview") return;
-    if (selection.view === "knowledge") return;
+    if (["knowledge", "tenants"].includes(selection.view)) return;
     const controller = new AbortController();
     query.current = controller;
     const botView = ["bots", "usage", "jobs", "configuration"].includes(
@@ -206,7 +208,10 @@ export default function Page() {
   }
 
   const pending = Boolean(
-    selected && selection.view !== "knowledge" && !data && !error,
+    selected &&
+      !["knowledge", "tenants"].includes(selection.view) &&
+      !data &&
+      !error,
   );
   const status = error ? (
     <p role="alert" className="notice error">
@@ -377,6 +382,7 @@ export default function Page() {
           {(
             [
               "overview",
+              "tenants",
               "bots",
               "events",
               "usage",
@@ -396,17 +402,20 @@ export default function Page() {
               <span aria-hidden="true">
                 {view === "overview"
                   ? "▦"
-                  : view === "bots"
-                    ? "◇"
-                    : view === "events"
-                      ? "≡"
-                      : view === "usage"
-                        ? "$"
-                        : "AI"}
+                  : view === "tenants"
+                    ? "▤"
+                    : view === "bots"
+                      ? "◇"
+                      : view === "events"
+                        ? "≡"
+                        : view === "usage"
+                          ? "$"
+                          : "AI"}
               </span>
               {
                 {
                   overview: "Overview",
+                  tenants: "Organizations",
                   bots: "Bots",
                   events: "Events",
                   usage: "Usage",
@@ -457,37 +466,82 @@ export default function Page() {
               <span className="eyebrow">WORKSPACE AT A GLANCE</span>
               <h1>{title}</h1>
               <p>
-                {selection.view === "knowledge"
-                  ? "Documents for "
-                  : selection.view === "configuration"
-                    ? "Tenant and bot AI configuration for "
-                    : selection.view === "jobs"
-                      ? "Stored job metadata for "
-                      : selection.view === "usage"
-                        ? "Recorded usage for "
-                        : selection.view === "bots"
-                          ? "Bot configuration for "
-                          : "Recent observations across "}
-                {data?.tenant.name ||
-                  tenants.find((item) => item.id === selected)?.name ||
-                  "your organization"}
+                {selection.view === "tenants"
+                  ? "Organizations loaded for your account"
+                  : selection.view === "knowledge"
+                    ? "Documents for "
+                    : selection.view === "configuration"
+                      ? "Tenant and bot AI configuration for "
+                      : selection.view === "jobs"
+                        ? "Stored job metadata for "
+                        : selection.view === "usage"
+                          ? "Recorded usage for "
+                          : selection.view === "bots"
+                            ? "Bot configuration for "
+                            : "Recent observations across "}
+                {selection.view !== "tenants" &&
+                  (data?.tenant.name ||
+                    tenants.find((item) => item.id === selected)?.name ||
+                    "your organization")}
                 .
               </p>
             </div>
-            <button
-              type="button"
-              className="refresh"
-              disabled={pending || busy || savingSettings || !selected}
-              onClick={() => {
-                if (selection.view === "knowledge")
-                  setKnowledgeRefresh((value) => value + 1);
-                choose(selected);
-              }}
-            >
-              <span aria-hidden="true">↻</span> Refresh
-            </button>
+            {selection.view !== "tenants" && (
+              <button
+                type="button"
+                className="refresh"
+                disabled={pending || busy || savingSettings || !selected}
+                onClick={() => {
+                  if (selection.view === "knowledge")
+                    setKnowledgeRefresh((value) => value + 1);
+                  choose(selected);
+                }}
+              >
+                <span aria-hidden="true">↻</span> Refresh
+              </button>
+            )}
           </div>
           {status}
+          {selection.view === "tenants" && tenants.length > 0 && (
+            <section className="panel activity">
+              <div className="panel-heading">
+                <h2>Memberships</h2>
+                <span>{tenants.length} loaded</span>
+              </div>
+              <ul className="bot-list">
+                {tenants.map((tenant) => (
+                  <li key={tenant.id}>
+                    <div className="bot-identity">
+                      <h3>{tenant.name}</h3>
+                      <p>
+                        {tenant.id === selected
+                          ? "Current organization"
+                          : "Available organization"}
+                      </p>
+                    </div>
+                    <div className="bot-status">
+                      <span className="bot-field">Your role</span>
+                      <strong>{tenant.role}</strong>
+                      <button
+                        type="button"
+                        className="refresh"
+                        disabled={busy || savingSettings}
+                        onClick={() => choose(tenant.id, "overview")}
+                        aria-label={`Open ${tenant.name} overview`}
+                      >
+                        Open overview
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <p className="activity-foot">
+                {hasMore
+                  ? "More organizations may be available. Use Load more organizations."
+                  : "This list reflects loaded membership pages and may change."}
+              </p>
+            </section>
+          )}
           {selected && selection.view === "knowledge" && (
             <Knowledge
               key={`${selected}-${knowledgeRefresh}`}

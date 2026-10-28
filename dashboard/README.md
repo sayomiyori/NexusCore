@@ -96,6 +96,11 @@ only numeric IPv4 loopback, not public hosts or forwarded headers.
 
 ## Boundaries
 
+Organizations shows the loaded issuer membership pages and roles. Use the
+existing load-more control for additional pages; the list is a snapshot and
+does not establish current membership. Opening an organization checks access
+again through the existing scoped Overview request.
+
 Knowledge Base lists tenant-scoped document metadata in pages of 50. A full
 page may be followed by an empty page; records may shift between offset pages
 when documents are added or removed. The issuer and AgentHub authorize each
