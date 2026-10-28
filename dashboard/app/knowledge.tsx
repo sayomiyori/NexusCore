@@ -12,8 +12,10 @@ export default function Knowledge({
   onExpired: () => void;
 }) {
   const [offset, setOffset] = useState(0);
+  const [attempt, setAttempt] = useState(0);
   const [page, setPage] = useState<KnowledgePage | null>(null);
   const [error, setError] = useState("");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: An explicit retry repeats the current page read.
   useEffect(() => {
     const controller = new AbortController();
     setPage(null);
@@ -28,10 +30,10 @@ export default function Knowledge({
         if (controller.signal.aborted) return;
         if (reason instanceof RequestError && reason.status === 401)
           onExpired();
-        else setError("Unable to load documents. Refresh to try again.");
+        else setError("Unable to load documents. Retry to try again.");
       });
     return () => controller.abort();
-  }, [tenant, offset, onExpired]);
+  }, [tenant, offset, onExpired, attempt]);
   return (
     <section className="panel activity">
       <div className="panel-heading">
@@ -39,7 +41,16 @@ export default function Knowledge({
         <span>Up to 50 per page</span>
       </div>
       {error ? (
-        <p role="alert">{error}</p>
+        <div className="empty">
+          <p role="alert">{error}</p>
+          <button
+            type="button"
+            className="refresh"
+            onClick={() => setAttempt((value) => value + 1)}
+          >
+            Retry page
+          </button>
+        </div>
       ) : !page ? (
         <p role="status">Loading documents…</p>
       ) : (
