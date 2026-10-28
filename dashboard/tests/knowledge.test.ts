@@ -99,6 +99,37 @@ test("knowledge fails closed on changed issuer scope and agent outage", async ()
   status = 401;
   assert.equal((await GET(request())).status, 401);
 });
+test("knowledge retries a failed page only on a new authorized request", async () => {
+  const query = `tenant=${tenant}&offset=50`;
+  const issuer = `/api/v1/tenants/${tenant}`;
+  const documents = `/api/v1/tenants/${tenant}/documents?offset=50&limit=50`;
+  agentStatus = 503;
+  assert.equal((await GET(request(query))).status, 502);
+  assert.deepEqual(calls, [issuer, documents]);
+
+  agentStatus = 200;
+  rows = [doc(51), doc(52)];
+  const response = await GET(request(query));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.offset, 50);
+  assert.deepEqual(
+    body.items.map((item: { id: number }) => item.id),
+    [51, 52],
+  );
+  assert.deepEqual(calls, [issuer, documents, issuer, documents]);
+});
+test("knowledge rechecks membership before retrying after an outage", async () => {
+  const query = `tenant=${tenant}&offset=50`;
+  const issuer = `/api/v1/tenants/${tenant}`;
+  const documents = `/api/v1/tenants/${tenant}/documents?offset=50&limit=50`;
+  agentStatus = 503;
+  assert.equal((await GET(request(query))).status, 502);
+  status = 403;
+  agentStatus = 200;
+  assert.equal((await GET(request(query))).status, 403);
+  assert.deepEqual(calls, [issuer, documents, issuer]);
+});
 test("knowledge validates pagination and upstream metadata", async () => {
   for (const query of [
     `tenant=${tenant}&offset=-1`,
