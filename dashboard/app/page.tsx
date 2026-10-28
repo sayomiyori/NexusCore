@@ -398,7 +398,15 @@ export default function Page() {
             disabled={busy || savingSettings || !tenants.length}
             onChange={(event) => choose(event.target.value)}
           >
-            {!tenants.length && <option value="">No organizations</option>}
+            {!tenants.length && (
+              <option value="">
+                {membershipState === "loading"
+                  ? "Loading organizations…"
+                  : membershipState === "error"
+                    ? "Organizations unavailable"
+                    : "No organizations"}
+              </option>
+            )}
             {tenants.map((tenant) => (
               <option key={tenant.id} value={tenant.id}>
                 {tenant.name}

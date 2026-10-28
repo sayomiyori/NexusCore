@@ -1,5 +1,15 @@
 # Verification tooling errors
 
+## 2026-10-28: Organization selector mislabeled failed refresh as empty
+
+- Symptom: after a failed membership refresh, the disabled selector said
+  `No organizations` while the page correctly reported an unavailable source.
+- Cause: the selector treated every empty local array as a successful empty read.
+- Fix: use the existing membership loading/error/ready state for its placeholder;
+  the successful empty state retains `No organizations`.
+- Detection: inspect the disabled selector during a delayed refresh, simulated
+  issuer failure, and a successful empty membership result.
+
 ## 2026-10-28: Membership pagination advertised a rejected next offset
 
 - Symptom: a full membership page at offset 99951 through 100000 advertised
