@@ -5,6 +5,7 @@ import type { BotPage } from "../lib/bots.ts";
 import { api, RequestError } from "../lib/client.ts";
 import { kindLabels, needsAttention, stateLabels } from "../lib/event-view.ts";
 import type { Overview, Tenant } from "../lib/overview.ts";
+import BotRegistration from "./bot-registration.tsx";
 import Configuration from "./configuration.tsx";
 import Events from "./events.tsx";
 import Jobs from "./jobs.tsx";
@@ -481,14 +482,18 @@ export default function Page() {
           <span className="read-only">
             {selection.view === "configuration"
               ? "MODEL SETTINGS"
-              : "READ ONLY"}
+              : selection.view === "bots"
+                ? "BOT REGISTRATION"
+                : "READ ONLY"}
           </span>
           <p>
             Observe your workspace.
             <br />
             {selection.view === "configuration"
               ? "Saving requires owner access."
-              : "Business data stays unchanged."}
+              : selection.view === "bots"
+                ? "Registration requires owner access."
+                : "Business data stays unchanged."}
           </p>
           <button
             type="button"
@@ -785,6 +790,14 @@ export default function Page() {
                 <h2>Registered bots</h2>
                 <span>{data.items.length} on this page · Up to 50</span>
               </div>
+              {data.tenant.role === "owner" && (
+                <BotRegistration
+                  tenant={selected}
+                  onSaving={setSavingSettings}
+                  onCreated={() => choose(selected, "bots")}
+                  onExpired={expire}
+                />
+              )}
               {data.items.length ? (
                 <ul className="bot-list">
                   {data.items.map((bot) => (
@@ -840,7 +853,7 @@ export default function Page() {
                 <button
                   type="button"
                   className="refresh"
-                  disabled={!selection.cursor || busy}
+                  disabled={!selection.cursor || busy || savingSettings}
                   onClick={() => choose(selected, "bots")}
                 >
                   First page
@@ -848,7 +861,7 @@ export default function Page() {
                 <button
                   type="button"
                   className="refresh"
-                  disabled={!data.nextCursor || busy}
+                  disabled={!data.nextCursor || busy || savingSettings}
                   onClick={() => choose(selected, "bots", data.nextCursor)}
                 >
                   Next page <span aria-hidden="true">→</span>

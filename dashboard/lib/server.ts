@@ -215,6 +215,7 @@ export function requestJson(
   tenant?: string,
   payload?: unknown,
   method?: "PUT",
+  successStatus = 200,
 ): Promise<unknown> {
   const target = privateOrigin(base) + path;
   if (!path.startsWith("/api/v1/") || path.includes("#"))
@@ -261,10 +262,13 @@ export function requestJson(
         });
         res.on("end", () => {
           clearTimeout(timer);
-          if (status !== 200 && status !== 204) {
+          if (
+            status !== successStatus &&
+            !(successStatus === 200 && status === 204)
+          ) {
             reject(
               new ApiError(
-                status === 422
+                status === 422 && successStatus === 200
                   ? 400
                   : [400, 401, 403, 404, 409, 429].includes(status)
                     ? status

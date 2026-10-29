@@ -31,8 +31,12 @@ Select an authorized organization and switch between Overview and Bots. Refresh
 returns to the first page. Bots uses Next page/First page and up to 50 records
 per response, without claiming a total. Names, activity flags and stored webhook
 states come from scoped configuration reads; no live Telegram health request is
-made. Overview, Bots, Events, Usage and AI jobs have no business mutation controls
-or automatic polling. AI Configuration supports owner-only model changes.
+made. Owners can register a bot from the Bots section with a name and Telegram
+token; members have read-only access. Registration verifies the token and stores
+it through WebHook Manager; it does not configure a webhook. A lost or malformed
+acknowledgement is unconfirmed: refresh the inventory before another attempt.
+Overview, Events, Usage and AI jobs have no business mutation controls or
+automatic polling. AI Configuration supports owner-only model changes.
 
 Events inspects the same ten merged observations as Overview, with full event/
 bot IDs, UTC times, receiver evidence and observed attempt counts. Kind,
@@ -147,7 +151,7 @@ view does not upload, delete, expose file paths or run embeddings.
   observations and abort stale reads. Logout clears cookies and requests issuer
   revocation; failures say when issuer sign-out could not be confirmed.
 
-No registration, OAuth, refresh workflow, bot editing, credential/processing activation, billing, Telegram alerts,
+No user registration, OAuth, session refresh workflow, bot editing or deactivation, processing activation, billing, Telegram alerts,
 public deployment or main-stack activation in this increment.
 
 Contract: [dashboard-overview.md](../specs/dashboard-overview.md).

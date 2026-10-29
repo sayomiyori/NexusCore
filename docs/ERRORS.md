@@ -1,5 +1,26 @@
 # Verification tooling errors
 
+## 2026-10-29: Registration proxy treated unexpected 422 as a confirmed rejection
+
+- Symptom: an unexpected WebHook 422 was translated into a normal dashboard 400.
+- Cause: the shared transport reused its read/settings 422 mapping for the new
+  registration request, although registration requires a strict 201 receipt.
+- Fix: preserve the old mapping for existing callers; for the registration
+  request map unexpected 422 to unconfirmed 502 without an automatic retry.
+- Detection: the registration status regression failed before the fix and now
+  checks 200, 204, 400, 401, 403, 404, 409, 422, 429 and 503.
+
+## 2026-10-29: Isolated bot registration could not reach its controlled receiver
+
+- Symptom: the first isolated UI registration returned an unconfirmed result and
+  created no bot. Its six owned containers exited cleanly; the attempt failed.
+- Cause: the inherited fixture pointed its controlled provider at loopback,
+  which its own internal-network safety check rejects.
+- Fix: a fresh fixture uses its own callback container's internal-network IP.
+  The synthetic Telegram MockTransport still rejects all other token/URL targets.
+- Detection: the second fixture registered one synthetic bot through the browser,
+  stored encrypted credentials and made no real Telegram/provider request.
+
 ## 2026-10-28: Organization selector mislabeled failed refresh as empty
 
 - Symptom: after a failed membership refresh, the disabled selector said

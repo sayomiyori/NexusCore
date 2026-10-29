@@ -12,7 +12,7 @@
     "start": "next start --hostname 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
-    "test": "node --test tests/server.test.ts tests/routes.test.ts tests/bots.test.ts tests/events.test.ts tests/usage.test.ts tests/jobs.test.ts tests/configuration.test.ts tests/ai-settings.test.ts tests/knowledge.test.ts tests/organizations.test.ts"
+    "test": "node --test tests/server.test.ts tests/routes.test.ts tests/bots.test.ts tests/events.test.ts tests/usage.test.ts tests/jobs.test.ts tests/configuration.test.ts tests/ai-settings.test.ts tests/knowledge.test.ts tests/organizations.test.ts tests/bot-registration.test.ts"
   },
   "dependencies": {
     "next": "16.4.3",
