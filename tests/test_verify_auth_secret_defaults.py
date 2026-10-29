@@ -30,6 +30,12 @@ class AuthSecretDefaultTests(unittest.TestCase):
         self.assertIn("${AUTH_SECRET_KEY:?Set AUTH_SECRET_KEY}", text)
         self.assertIn("${WEBHOOK_SECRET_KEY:?Set WEBHOOK_SECRET_KEY}", text)
 
+    def test_auth_service_does_not_trust_forwarded_headers(self) -> None:
+        text = COMPOSE.read_text(encoding="utf-8")
+        start = text.index("  auth_service:")
+        end = text.index("  webhook_service:", start)
+        self.assertIn("--no-proxy-headers", text[start:end])
+
 
 if __name__ == "__main__":
     unittest.main()

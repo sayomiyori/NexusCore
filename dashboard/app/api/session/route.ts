@@ -1,4 +1,6 @@
+import { createHash, randomBytes } from "node:crypto";
 import type { NextRequest } from "next/server.js";
+import { createLoginLimiter } from "../../../lib/login-limit.ts";
 import {
   ApiError,
   bearer,
@@ -11,6 +13,9 @@ import {
   reply,
   requestJson,
 } from "../../../lib/server.ts";
+
+const loginLimiter = createLoginLimiter({ limit: 5, windowMs: 60_000 });
+const loginSalt = randomBytes(32);
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,6 +31,11 @@ export async function POST(request: NextRequest) {
       input.password.length > 0 &&
       input.password.length <= 1024
     ) {
+      const key = createHash("sha256")
+        .update(loginSalt)
+        .update(input.email.trim().toLowerCase())
+        .digest("hex");
+      if (!loginLimiter.allow(key).allowed) throw new ApiError(429);
       path = "/api/v1/auth/login";
       credentials = { email: input.email, password: input.password };
     } else if (
