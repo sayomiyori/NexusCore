@@ -8,12 +8,20 @@ on:
       - 'requirements-checks.txt'
       - 'scripts/**'
       - 'tests/**'
+      - 'docker-compose.yml'
+      - 'docker-compose.*.yml'
+      - '.env.example'
+      - 'specs/platform-agent-boundary.md'
   pull_request:
     paths:
       - '.github/workflows/local-checks.yml'
       - 'requirements-checks.txt'
       - 'scripts/**'
       - 'tests/**'
+      - 'docker-compose.yml'
+      - 'docker-compose.*.yml'
+      - '.env.example'
+      - 'specs/platform-agent-boundary.md'
   workflow_dispatch:
 
 permissions:
