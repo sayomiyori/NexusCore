@@ -21,3 +21,10 @@ allow an explicit refresh retry; 401 ends the session. Aborted membership reads
 cannot restore rows or a logged-out screen. No automatic polling is introduced.
 At the maximum accepted offset 100000, a full page has no next-page control;
 the loaded count must never be presented as the total membership count.
+
+The directory supports case-insensitive name search over loaded memberships only.
+The result count shows matching and loaded rows, not total organizations. Empty
+search results are distinct from an empty membership list. Loading another page
+applies the current search to those newly loaded rows; leaving or refreshing the
+directory resets the search. Search makes no additional requests and never changes
+the selected organization or authorization checks.

@@ -9,6 +9,7 @@ import Configuration from "./configuration.tsx";
 import Events from "./events.tsx";
 import Jobs from "./jobs.tsx";
 import Knowledge from "./knowledge.tsx";
+import Organizations from "./organizations.tsx";
 import Usage from "./usage.tsx";
 
 type TenantPage = { items: Tenant[]; hasMore: boolean; offset: number };
@@ -556,44 +557,13 @@ export default function Page() {
           </div>
           {status}
           {selection.view === "tenants" && tenants.length > 0 && (
-            <section className="panel activity">
-              <div className="panel-heading">
-                <h2>Memberships</h2>
-                <span>{tenants.length} loaded</span>
-              </div>
-              <ul className="bot-list">
-                {tenants.map((tenant) => (
-                  <li key={tenant.id}>
-                    <div className="bot-identity">
-                      <h3>{tenant.name}</h3>
-                      <p>
-                        {tenant.id === selected
-                          ? "Current organization"
-                          : "Available organization"}
-                      </p>
-                    </div>
-                    <div className="bot-status">
-                      <span className="bot-field">Your role</span>
-                      <strong>{tenant.role}</strong>
-                      <button
-                        type="button"
-                        className="refresh"
-                        disabled={busy || savingSettings}
-                        onClick={() => choose(tenant.id, "overview")}
-                        aria-label={`Open ${tenant.name} overview`}
-                      >
-                        Open overview
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              <p className="activity-foot">
-                {hasMore
-                  ? "More organizations may be available. Use Load more organizations."
-                  : "This list reflects loaded membership pages and may change."}
-              </p>
-            </section>
+            <Organizations
+              tenants={tenants}
+              selected={selected}
+              hasMore={hasMore}
+              disabled={busy || savingSettings}
+              onOpen={(id) => choose(id, "overview")}
+            />
           )}
           {selected && selection.view === "knowledge" && (
             <Knowledge

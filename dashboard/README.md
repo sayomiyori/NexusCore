@@ -100,6 +100,7 @@ Organizations shows the loaded issuer membership pages and roles. Use the
 existing load-more control for additional pages; the list is a snapshot and
 does not establish current membership. Opening an organization checks access
 again through the existing scoped Overview request.
+Search filters loaded organization names only; load more pages to search them too.
 Refresh clears the loaded membership pages and selection, then loads the first
 page again. Loading, failed refresh and an empty successful result are distinct.
 Use Refresh to retry a failure. The first returned organization becomes selected;
