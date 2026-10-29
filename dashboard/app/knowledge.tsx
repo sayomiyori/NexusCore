@@ -3,6 +3,25 @@
 import { useEffect, useState } from "react";
 import { api, RequestError } from "../lib/client.ts";
 import type { KnowledgePage } from "../lib/knowledge.ts";
+import { knowledgeStatus } from "../lib/knowledge-status.ts";
+
+export function KnowledgeStatus({
+  status,
+  chunks,
+}: {
+  status: string;
+  chunks: number;
+}) {
+  const { label, detail } = knowledgeStatus(status);
+  return (
+    <>
+      <span className="bot-field">Index status</span>
+      <strong>{label}</strong>
+      <p>{chunks} chunks</p>
+      <p>{detail}</p>
+    </>
+  );
+}
 
 export default function Knowledge({
   tenant,
@@ -65,9 +84,10 @@ export default function Knowledge({
                     <p>{item.type.toUpperCase()}</p>
                   </div>
                   <div className="bot-status">
-                    <span className="bot-field">Index status</span>
-                    <strong>{item.status}</strong>
-                    <p>{item.chunks} chunks</p>
+                    <KnowledgeStatus
+                      status={item.status}
+                      chunks={item.chunks}
+                    />
                   </div>
                 </li>
               ))}
