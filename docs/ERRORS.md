@@ -1,5 +1,25 @@
 # Verification tooling errors
 
+## 2026-10-29: Empty webhook preview POST was rejected in Next.js
+
+- Symptom: the first isolated dry-run check returned 400 before authorization.
+- Cause: the HTTP server represented a zero-length POST as a non-null body stream,
+  while the BFF treated any body stream as nonempty. In-process route tests with
+  a synthetic NextRequest did not reproduce the transport representation.
+- Fix: require a bounded, exact empty JSON object using the existing body parser;
+  the UI sends `{}` and the BFF still constructs only `{dry_run:true}` upstream.
+- Detection: route regressions reject missing body and a supplied dry_run=false;
+  the isolated HTTP/browser acceptance repeats owner and member cases.
+
+## 2026-10-29: Webhook preview accepted empty query or fragment delimiters
+
+- Symptom: a backend acknowledgement ending in `?` or `#` passed URL validation.
+- Cause: WHATWG URL parsing normalizes empty query/fragment values to empty strings.
+- Fix: reject both delimiters in the original bounded ASCII URL before accepting
+  the scoped HTTPS acknowledgement. The URL is never returned to the browser.
+- Detection: the preview acknowledgement test failed before the fix and now
+  rejects both empty delimiters and nonempty queries.
+
 ## 2026-10-29: Registration proxy treated unexpected 422 as a confirmed rejection
 
 - Symptom: an unexpected WebHook 422 was translated into a normal dashboard 400.

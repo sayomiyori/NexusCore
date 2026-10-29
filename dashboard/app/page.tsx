@@ -6,6 +6,7 @@ import { api, RequestError } from "../lib/client.ts";
 import { kindLabels, needsAttention, stateLabels } from "../lib/event-view.ts";
 import type { Overview, Tenant } from "../lib/overview.ts";
 import BotRegistration from "./bot-registration.tsx";
+import BotWebhookPreview from "./bot-webhook-preview.tsx";
 import Configuration from "./configuration.tsx";
 import Events from "./events.tsx";
 import Jobs from "./jobs.tsx";
@@ -831,6 +832,14 @@ export default function Page() {
                             })}
                           </time>
                         </p>
+                        {data.tenant.role === "owner" && bot.active && (
+                          <BotWebhookPreview
+                            tenant={selected}
+                            bot={bot.id}
+                            disabled={busy || savingSettings}
+                            onExpired={expire}
+                          />
+                        )}
                       </div>
                     </li>
                   ))}

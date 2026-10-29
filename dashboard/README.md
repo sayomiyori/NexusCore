@@ -35,6 +35,10 @@ made. Owners can register a bot from the Bots section with a name and Telegram
 token; members have read-only access. Registration verifies the token and stores
 it through WebHook Manager; it does not configure a webhook. A lost or malformed
 acknowledgement is unconfirmed: refresh the inventory before another attempt.
+Owners can also run a webhook preparation check for active bots. This uses only
+the backend's dry-run operation and does not configure a webhook. The isolated
+WebHook Manager must have its Telegram platform mode and required configuration
+enabled for the check; enabling that mode on an existing stand is separate work.
 Overview, Events, Usage and AI jobs have no business mutation controls or
 automatic polling. AI Configuration supports owner-only model changes.
 
