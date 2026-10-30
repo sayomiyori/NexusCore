@@ -312,7 +312,10 @@ def recover_with_scanners(fixture):
 def verify(fixture):
     auth, web, agent = (fixture.url(name) for name in ("auth_service", "webhook_service", "agent_service"))
     http = fixture.http
-    receipt = lambda: http(fixture.callback_origin + "/receipt")[1]
+
+    def receipt():
+        return http(fixture.callback_origin + "/receipt")[1]
+
     account = {"email": f"ai-{fixture.project}@example.com", "username": "verification", "password": "Aa1!" + secrets.token_urlsafe(24)}
     smoke.expect(http(auth + "/api/v1/auth/register", "POST", account)[0], 200)
     status, login = http(auth + "/api/v1/auth/login", "POST", account)
