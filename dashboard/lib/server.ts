@@ -95,6 +95,37 @@ export function bearer(value: unknown): string {
   return value;
 }
 
+function httpsOrigin(): boolean {
+  return (
+    process.env.NODE_ENV === "production" &&
+    (process.env.DASHBOARD_ORIGIN || "").startsWith("https://")
+  );
+}
+
+function secureCookie(): boolean {
+  return process.env.NODE_ENV === "production";
+}
+
+export function sessionCookieName(): string {
+  return httpsOrigin() ? "__Host-nexus_session" : "nexus_session";
+}
+
+export function challengeCookieName(): string {
+  return httpsOrigin() ? "__Host-nexus_challenge" : "nexus_challenge";
+}
+
+export function singleCookie(
+  request: NextRequest,
+  name: string,
+): string | undefined {
+  const raw = request.headers.get("cookie") || "";
+  const count = raw
+    .split(";")
+    .filter((part) => part.trim().startsWith(`${name}=`)).length;
+  if (count > 1) throw new ApiError(400);
+  return request.cookies.get(name)?.value;
+}
+
 export function guard(
   request: NextRequest,
   session = true,
@@ -106,7 +137,7 @@ export function guard(
   )
     throw new ApiError(403);
   if (!session) return undefined;
-  const token = request.cookies.get("nexus_session")?.value;
+  const token = singleCookie(request, sessionCookieName());
   if (!token) throw new ApiError(401);
   return bearer(token);
 }
@@ -149,7 +180,7 @@ export function cookie(
   response.cookies.set(name, value, {
     httpOnly: true,
     sameSite: "strict",
-    secure: process.env.NODE_ENV === "production",
+    secure: secureCookie(),
     path: "/",
     maxAge,
   });

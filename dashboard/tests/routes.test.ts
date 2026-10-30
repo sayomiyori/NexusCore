@@ -211,6 +211,45 @@ function request(
 
 test("login keeps access/refresh credentials out of JSON and secures production cookies", async () => {
   const original = process.env.NODE_ENV;
+  const originalOrigin = process.env.DASHBOARD_ORIGIN;
+  Object.assign(process.env, {
+    NODE_ENV: "production",
+    DASHBOARD_ORIGIN: "https://127.0.0.1:3000",
+  });
+  try {
+    const response = await POST(
+      request(
+        "/api/session",
+        "POST",
+        {
+          email: "test@example.com",
+          password: "synthetic-password",
+        },
+        { origin: "https://127.0.0.1:3000" },
+      ),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { requires2fa: false });
+    const cookies = response.headers.getSetCookie().join(";");
+    assert.match(cookies, /__Host-nexus_session=/);
+    assert.match(cookies, /HttpOnly/);
+    assert.match(cookies, /Secure/);
+    assert.match(cookies, /SameSite=strict/);
+    assert.match(cookies, /Path=\//);
+    assert(!cookies.includes("Domain="));
+    assert(!cookies.includes("private-refresh-secret"));
+    assert.match(response.headers.get("cache-control") || "", /no-store/);
+  } finally {
+    if (original === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
+    else Object.assign(process.env, { NODE_ENV: original });
+    if (originalOrigin === undefined)
+      Reflect.deleteProperty(process.env, "DASHBOARD_ORIGIN");
+    else Object.assign(process.env, { DASHBOARD_ORIGIN: originalOrigin });
+  }
+});
+
+test("production loopback keeps legacy cookie names but still sets Secure", async () => {
+  const original = process.env.NODE_ENV;
   Object.assign(process.env, { NODE_ENV: "production" });
   try {
     const response = await POST(
@@ -220,13 +259,12 @@ test("login keeps access/refresh credentials out of JSON and secures production 
       }),
     );
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { requires2fa: false });
     const cookies = response.headers.getSetCookie().join(";");
-    assert.match(cookies, /HttpOnly/);
+    assert.match(cookies, /nexus_session=/);
+    assert(!cookies.includes("__Host-"));
     assert.match(cookies, /Secure/);
+    assert.match(cookies, /HttpOnly/);
     assert.match(cookies, /SameSite=strict/);
-    assert(!cookies.includes("private-refresh-secret"));
-    assert.match(response.headers.get("cache-control") || "", /no-store/);
   } finally {
     if (original === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
     else Object.assign(process.env, { NODE_ENV: original });

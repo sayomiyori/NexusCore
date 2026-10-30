@@ -1,10 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { NextRequest } from "next/server.js";
+import type { NextRequest, NextResponse } from "next/server.js";
 import { createLoginLimiter } from "../../../lib/login-limit.ts";
 import {
   ApiError,
   bearer,
   body,
+  challengeCookieName,
   cookie,
   failure,
   guard,
@@ -12,6 +13,8 @@ import {
   record,
   reply,
   requestJson,
+  sessionCookieName,
+  singleCookie,
 } from "../../../lib/server.ts";
 
 const loginLimiter = createLoginLimiter({ limit: 5, windowMs: 60_000 });
@@ -46,7 +49,7 @@ export async function POST(request: NextRequest) {
     ) {
       path = "/api/v1/auth/login/2fa";
       credentials = {
-        temp_token: bearer(request.cookies.get("nexus_challenge")?.value),
+        temp_token: bearer(singleCookie(request, challengeCookieName())),
         code: input.code,
       };
     } else {
@@ -63,18 +66,25 @@ export async function POST(request: NextRequest) {
     );
     if (result.requires_2fa === true) {
       const response = reply({ requires2fa: true });
-      cookie(response, "nexus_session", "", 0);
-      cookie(response, "nexus_challenge", bearer(result.temp_token), 300);
+      cookie(response, sessionCookieName(), "", 0);
+      cookie(response, challengeCookieName(), bearer(result.temp_token), 300);
       return response;
     }
     if (result.token_type !== "bearer") throw new ApiError(502);
     const response = reply({ requires2fa: false });
-    cookie(response, "nexus_session", bearer(result.access_token), 900);
-    cookie(response, "nexus_challenge", "", 0);
+    cookie(response, sessionCookieName(), bearer(result.access_token), 900);
+    cookie(response, challengeCookieName(), "", 0);
     return response;
   } catch (error) {
     return failure(error);
   }
+}
+
+function clearSessionCookies(response: NextResponse): void {
+  for (const name of new Set([sessionCookieName(), "nexus_session"]))
+    cookie(response, name, "", 0);
+  for (const name of new Set([challengeCookieName(), "nexus_challenge"]))
+    cookie(response, name, "", 0);
 }
 
 export async function DELETE(request: NextRequest) {
@@ -84,7 +94,14 @@ export async function DELETE(request: NextRequest) {
     return failure(error);
   }
   let failed = false;
-  const token = request.cookies.get("nexus_session")?.value;
+  let token: string | undefined;
+  try {
+    token = singleCookie(request, sessionCookieName());
+  } catch (error) {
+    const response = failure(error);
+    clearSessionCookies(response);
+    return response;
+  }
   if (token) {
     try {
       await requestJson(
@@ -107,7 +124,6 @@ export async function DELETE(request: NextRequest) {
       : { signedOut: true },
     failed ? 502 : 200,
   );
-  cookie(response, "nexus_session", "", 0);
-  cookie(response, "nexus_challenge", "", 0);
+  clearSessionCookies(response);
   return response;
 }
