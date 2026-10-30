@@ -8,20 +8,28 @@ on:
       - 'requirements-checks.txt'
       - 'scripts/**'
       - 'tests/**'
+      - 'init-scripts/**'
       - 'docker-compose.yml'
       - 'docker-compose.*.yml'
       - '.env.example'
       - 'specs/platform-agent-boundary.md'
+      - 'specs/auth-session-hardening.md'
+      - 'specs/login-rate-limit.md'
+      - 'specs/infra-auth.md'
   pull_request:
     paths:
       - '.github/workflows/local-checks.yml'
       - 'requirements-checks.txt'
       - 'scripts/**'
       - 'tests/**'
+      - 'init-scripts/**'
       - 'docker-compose.yml'
       - 'docker-compose.*.yml'
       - '.env.example'
       - 'specs/platform-agent-boundary.md'
+      - 'specs/auth-session-hardening.md'
+      - 'specs/login-rate-limit.md'
+      - 'specs/infra-auth.md'
   workflow_dispatch:
 
 permissions:

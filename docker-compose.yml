@@ -17,6 +17,9 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD}
+      WEBHOOK_DB_PASSWORD: ${WEBHOOK_DB_PASSWORD:?Set WEBHOOK_DB_PASSWORD}
+      AGENT_DB_PASSWORD: ${AGENT_DB_PASSWORD:?Set AGENT_DB_PASSWORD}
     volumes:
       - nexus_postgres_data:/var/lib/postgresql/data
       - ./init-scripts:/docker-entrypoint-initdb.d:ro
@@ -34,6 +37,9 @@ services:
     image: redis:7-alpine
     container_name: nexus-redis
     restart: unless-stopped
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
     ports:
       - "127.0.0.1:26379:6379"
     volumes:
@@ -41,7 +47,7 @@ services:
     networks:
       - nexus_net
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -60,8 +66,8 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/authfortress
-      REDIS_URL: redis://redis:6379/1
+      DATABASE_URL: postgresql+psycopg2://auth_service:${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD}@postgres:5432/authfortress
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/1
       JWT_SECRET_KEY: ${AUTH_SECRET_KEY:?Set AUTH_SECRET_KEY}
       # Null passes through a configured key and omits it when absent.
       AUTHFORTRESS_WEBHOOK_SERVICE_KEY:
@@ -90,9 +96,9 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/webhook_manager
-      REDIS_URL: redis://redis:6379/2
-      CELERY_BROKER_URL: redis://redis:6379/2
+      DATABASE_URL: postgresql+asyncpg://webhook_service:${WEBHOOK_DB_PASSWORD:?Set WEBHOOK_DB_PASSWORD}@postgres:5432/webhook_manager
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/2
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/2
       SECRET_KEY: ${WEBHOOK_SECRET_KEY:?Set WEBHOOK_SECRET_KEY}
       PLATFORM_BOTS_ENABLED: ${PLATFORM_BOTS_ENABLED:-false}
       AUTHFORTRESS_BASE_URL: http://auth_service:8000
@@ -132,9 +138,9 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/webhook_manager
-      REDIS_URL: redis://redis:6379/2
-      CELERY_BROKER_URL: redis://redis:6379/2
+      DATABASE_URL: postgresql+asyncpg://webhook_service:${WEBHOOK_DB_PASSWORD:?Set WEBHOOK_DB_PASSWORD}@postgres:5432/webhook_manager
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/2
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/2
       SECRET_KEY: ${WEBHOOK_SECRET_KEY:?Set WEBHOOK_SECRET_KEY}
       PLATFORM_BOTS_ENABLED: "false"
       PLATFORM_TELEGRAM_ENABLED: "false"
@@ -157,9 +163,9 @@ services:
       webhook_service:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/webhook_manager
-      REDIS_URL: redis://redis:6379/2
-      CELERY_BROKER_URL: redis://redis:6379/2
+      DATABASE_URL: postgresql+asyncpg://webhook_service:${WEBHOOK_DB_PASSWORD:?Set WEBHOOK_DB_PASSWORD}@postgres:5432/webhook_manager
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/2
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/2
       SECRET_KEY: ${WEBHOOK_SECRET_KEY:?Set WEBHOOK_SECRET_KEY}
       PLATFORM_BOTS_ENABLED: "false"
       PLATFORM_TELEGRAM_ENABLED: "false"
@@ -178,9 +184,9 @@ services:
       webhook_service:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/webhook_manager
-      REDIS_URL: redis://redis:6379/2
-      CELERY_BROKER_URL: redis://redis:6379/2
+      DATABASE_URL: postgresql+asyncpg://webhook_service:${WEBHOOK_DB_PASSWORD:?Set WEBHOOK_DB_PASSWORD}@postgres:5432/webhook_manager
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/2
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/2
       SECRET_KEY: ${WEBHOOK_SECRET_KEY:?Set WEBHOOK_SECRET_KEY}
       PLATFORM_BOTS_ENABLED: "false"
       PLATFORM_TELEGRAM_ENABLED: "false"
@@ -208,8 +214,8 @@ services:
       redis:
         condition: service_healthy
     environment: &agent_platform_environment
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/agenthub
-      REDIS_URL: redis://redis:6379/3
+      DATABASE_URL: postgresql+psycopg://agent_service:${AGENT_DB_PASSWORD:?Set AGENT_DB_PASSWORD}@postgres:5432/agenthub
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/3
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-groq}
       LLM_MODEL: ${LLM_MODEL:-llama-3.3-70b-versatile}
@@ -252,8 +258,8 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/agenthub
-      REDIS_URL: redis://redis:6379/3
+      DATABASE_URL: postgresql+psycopg://agent_service:${AGENT_DB_PASSWORD:?Set AGENT_DB_PASSWORD}@postgres:5432/agenthub
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/3
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-groq}
       LLM_MODEL: ${LLM_MODEL:-llama-3.3-70b-versatile}
@@ -321,9 +327,9 @@ services:
       webhook_service:
         condition: service_healthy
     environment: &webhook_sender_environment
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/webhook_manager
-      REDIS_URL: redis://redis:6379/2
-      CELERY_BROKER_URL: redis://redis:6379/2
+      DATABASE_URL: postgresql+asyncpg://webhook_service:${WEBHOOK_DB_PASSWORD:?Set WEBHOOK_DB_PASSWORD}@postgres:5432/webhook_manager
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/2
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/2
       SECRET_KEY: ${WEBHOOK_SECRET_KEY:?Set WEBHOOK_SECRET_KEY}
       PLATFORM_BOTS_ENABLED: ${PLATFORM_BOTS_ENABLED:-false}
       PLATFORM_TELEGRAM_ENABLED: ${PLATFORM_TELEGRAM_ENABLED:-false}
