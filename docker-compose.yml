@@ -15,8 +15,8 @@ services:
     container_name: nexus-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD}
       WEBHOOK_DB_PASSWORD: ${WEBHOOK_DB_PASSWORD:?Set WEBHOOK_DB_PASSWORD}
       AGENT_DB_PASSWORD: ${AGENT_DB_PASSWORD:?Set AGENT_DB_PASSWORD}
@@ -59,6 +59,7 @@ services:
       dockerfile: Dockerfile
     container_name: nexus-auth
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
     command: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers"
     depends_on:
       postgres:
@@ -89,6 +90,7 @@ services:
       dockerfile: Dockerfile
     container_name: nexus-webhook-api
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
     command: sh -c "python -m alembic upgrade head && exec uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers"
     depends_on:
       postgres:
@@ -208,6 +210,7 @@ services:
       dockerfile: Dockerfile
     container_name: nexus-agent-api
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
     # The integrated root must not run AgentHub's unauthenticated standalone API.
     command: sh -c "python /app/agent_platform_preflight.py && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"
     depends_on:
