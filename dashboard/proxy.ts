@@ -15,6 +15,9 @@ export function proxy(request: NextRequest) {
     "Permissions-Policy",
     "camera=(), microphone=(), geolocation=()",
   );
+  // Older clients ignore CSP frame-ancestors; keep the legacy header too.
+  response.headers.set("X-Frame-Options", "DENY");
+  response.headers.set("Cross-Origin-Opener-Policy", "same-origin");
   return response;
 }
 

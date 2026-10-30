@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import config from "../next.config.ts";
+import { NextRequest } from "next/server.js";
+import { proxy } from "../proxy.ts";
 
+const browser = "http://127.0.0.1:3000";
 const original = process.env.NODE_ENV;
 
 afterEach(() => {
@@ -9,44 +11,50 @@ afterEach(() => {
   else Object.assign(process.env, { NODE_ENV: original });
 });
 
-async function headers(): Promise<Record<string, string>> {
-  if (typeof config.headers !== "function") throw new Error("no headers()");
-  const rules = await config.headers();
-  assert.equal(rules.length, 1);
-  assert.equal(rules[0].source, "/(.*)");
-  return Object.fromEntries(
-    rules[0].headers.map(({ key, value }) => [key, value]),
-  );
+function request(path = "/"): NextRequest {
+  return new NextRequest(browser + path, {
+    headers: { host: "127.0.0.1:3000", origin: browser },
+  });
 }
 
-test("sends the documented security headers on every route", async () => {
+test("the middleware answers with the full documented header set", () => {
   Object.assign(process.env, { NODE_ENV: "production" });
-  const sent = await headers();
-  assert.equal(sent["X-Content-Type-Options"], "nosniff");
-  assert.equal(sent["X-Frame-Options"], "DENY");
-  assert.equal(sent["Referrer-Policy"], "strict-origin-when-cross-origin");
-  assert.equal(sent["Cross-Origin-Opener-Policy"], "same-origin");
-  assert.match(sent["Permissions-Policy"], /camera=\(\)/);
-  assert.match(sent["Permissions-Policy"], /geolocation=\(\)/);
-  assert.equal(config.poweredByHeader, false);
+  const response = proxy(request("/dashboard"));
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+  assert.equal(
+    response.headers.get("cross-origin-opener-policy"),
+    "same-origin",
+  );
+  assert.equal(
+    response.headers.get("permissions-policy"),
+    "camera=(), microphone=(), geolocation=()",
+  );
+  assert.match(response.headers.get("cache-control") || "", /no-store/);
 });
 
-test("locks the content security policy to same-origin framing", async () => {
+test("the nonce policy is strict in production and relaxed only in dev", () => {
   Object.assign(process.env, { NODE_ENV: "production" });
-  const policy = (await headers())["Content-Security-Policy"];
-  assert(policy);
+  const first = proxy(request());
+  const policy = first.headers.get("content-security-policy") || "";
+  assert.match(policy, /'nonce-[^']+'/);
+  assert.match(policy, /'strict-dynamic'/);
   assert.match(policy, /frame-ancestors 'none'/);
-  assert.match(policy, /base-uri 'self'/);
-  assert.match(policy, /form-action 'self'/);
   assert.match(policy, /object-src 'none'/);
-  assert.match(policy, /default-src 'self'/);
-  assert.match(policy, /connect-src 'self'/);
-  assert.match(policy, /script-src 'self' 'unsafe-inline'/);
-  assert(!policy.includes("unsafe-eval"));
+  assert.match(policy, /base-uri 'none'/);
+  assert.match(policy, /form-action 'self'/);
+  assert(!policy.includes("unsafe-"));
+
+  Object.assign(process.env, { NODE_ENV: "development" });
+  assert.match(
+    proxy(request()).headers.get("content-security-policy") || "",
+    /'unsafe-eval'/,
+  );
 });
 
-test("only the development server allows eval for hot reload", async () => {
-  Object.assign(process.env, { NODE_ENV: "development" });
-  const policy = (await headers())["Content-Security-Policy"];
-  assert.match(policy, /script-src 'self' 'unsafe-inline' 'unsafe-eval'/);
+test("every response carries a fresh nonce", () => {
+  const first = proxy(request()).headers.get("content-security-policy");
+  const second = proxy(request()).headers.get("content-security-policy");
+  assert.notEqual(first, second);
 });
