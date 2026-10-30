@@ -85,12 +85,13 @@ is not automatic and was not run against the main deployment.
 - Static checks performed at implementation time: PyYAML parse of
   `docker-compose.yml`, `bash -n` on both shell scripts, the NexusCore unittest
   suite and ruff on the new test.
-- Dynamic PostgreSQL/Redis acceptance is **pending** because the Docker engine
-  was unavailable during this increment. When available: start disposable
-  PostgreSQL 16 with `init-scripts` and the three role passwords, verify each
-  role can create/read only in its own database and cross-database `CONNECT`
-  fails, and verify Redis returns `NOAUTH` without the password and `PONG` with
-  `REDISCLI_AUTH`.
+- Dynamic PostgreSQL/Redis acceptance was completed on 2026-10-30 against
+  disposable containers; see
+  `docs/security-hardening-stage-c-dynamic-2026-10-30.md`. Roles are created on a
+  fresh volume, each role can create/write only in its own database, cross-database
+  `CONNECT` fails for both other service roles and for an unrelated LOGIN role,
+  Alembic `upgrade head` succeeds as each role, and Redis returns `NOAUTH` without
+  the password and `PONG` with `REDISCLI_AUTH`.
 
 ## Residuals
 

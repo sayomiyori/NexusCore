@@ -19,10 +19,10 @@ claim.
 - Static verification: 148 root tests passed, both shell scripts pass `bash -n`,
   `docker-compose.yml` parses, a synthetic-compose `config --quiet` exits 0, and
   `.env.example` fails closed.
-- Dynamic PostgreSQL/Redis acceptance is **pending**: the Docker engine was
-  unavailable. Fresh init, cross-database `CONNECT` denial, Alembic as each
-  role, Redis `NOAUTH`/`PONG` and the authenticated healthcheck still need a
-  disposable run.
+- Dynamic PostgreSQL/Redis acceptance is **closed**: see
+  `docs/security-hardening-stage-c-dynamic-2026-10-30.md` for the disposable
+  fresh-volume and existing-volume runs (role isolation, cross-database `CONNECT`
+  denial, Alembic as each role, Redis `NOAUTH`/`PONG`).
 - The live stack was not restarted. Existing `.env` lacks the three DB
   passwords, so compose commands fail closed until rollout step 1.
 
