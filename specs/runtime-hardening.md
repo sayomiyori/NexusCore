@@ -1,32 +1,30 @@
 # Runtime and response hardening (Stage F)
 
-This increment covers two NexusCore-owned gaps left by Stage E: the dashboard
-sent no security response headers, and the API containers ran with writable root
-filesystems, full capability sets and unbounded container logs. It does not
-change any sibling service source tree, so backend `/docs`, `/openapi.json` and
+This increment closes two gaps left by Stage E: the dashboard middleware did not
+send the legacy framing header or cross-origin isolation, and the API containers
+ran with writable root filesystems, full capability sets and unbounded container
+logs. It touches only NexusCore-owned files. Backend `/docs`, `/openapi.json` and
 `/metrics` gating stays a separate, explicitly blocked item (see Residuals).
 
 ## Dashboard response headers
 
-`dashboard/next.config.ts` sends a fixed header set on `/(.*)`:
+`dashboard/proxy.ts` already sent a per-request nonce CSP (plus
+`X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` and
+`Cache-Control: private, no-store`) before this stage; `dashboard/next.config.ts`
+only disabled `X-Powered-By`. That existing policy is the one that actually
+ships, so it stays the single source of truth and the config object is left
+alone.
 
-- `X-Content-Type-Options: nosniff`
-- `X-Frame-Options: DENY`
-- `Referrer-Policy: strict-origin-when-cross-origin`
-- `Permissions-Policy` denying camera, microphone, geolocation and interest
-  cohorts
-- `Cross-Origin-Opener-Policy: same-origin`
-- `Content-Security-Policy` with `default-src 'self'`, `frame-ancestors 'none'`,
-  `base-uri 'self'`, `form-action 'self'`, `img-src 'self' data:`,
-  `style-src 'self' 'unsafe-inline'`, `script-src 'self' 'unsafe-inline'` and
-  `connect-src 'self'`
+This stage adds the two missing headers to the same middleware:
 
-`poweredByHeader` stays off, so `X-Powered-By` is still absent.
+- `X-Frame-Options: DENY` for clients that ignore CSP `frame-ancestors`.
+- `Cross-Origin-Opener-Policy: same-origin` so the dashboard is isolated from
+  cross-origin window handles.
 
-The CSP keeps `'unsafe-inline'` for scripts and styles because Next.js injects
-inline bootstrap/hydration code and there is no nonce plumbing yet. That is
-recorded as a residual rather than hidden. Development adds `'unsafe-eval'` so
-the dev server keeps working; production builds do not.
+The production CSP remains strictly nonce-based with `'strict-dynamic'`,
+`base-uri 'none'`, `object-src 'none'`, `form-action 'self'` and
+`frame-ancestors 'none'`; `'unsafe-eval'` is still added only outside production
+for hot reload.
 
 ## Container runtime defaults
 
@@ -49,19 +47,20 @@ They still get the log rotation from the shared logging block.
 
 ## Verification
 
-- Dashboard `tests/security-headers.test.ts` imports the real config and asserts
-  every header value, `frame-ancestors 'none'`, absence of `unsafe-eval` in
-  production, and its presence in development.
-- `tests/test_verify_runtime_hardening.py` asserts the resolved Compose
-  structure: the logging block on every service, `read_only`/`cap_drop`/
-  `tmpfs`/`pids_limit` on exactly the three API services, and
-  `no-new-privileges` still present.
-- `docker compose config` must resolve; the three built API images were started
-  with `--read-only --tmpfs /tmp --cap-drop ALL` alongside the live stack and
-  answered their health endpoints, which is the runtime proof behind
-  `read_only`. Details and the disposable PostgreSQL/Redis used for
-  `agent_service` are in
-  `docs/security-hardening-stage-f-2026-10-30.md`.
+- Dashboard `tests/security-headers.test.ts` calls the real `proxy()` function
+  and asserts the emitted response headers: `nosniff`, `X-Frame-Options`,
+  `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`,
+  `Cache-Control`, and the CSP shape (nonce, `'strict-dynamic'`,
+  `frame-ancestors 'none'`, no `unsafe-` in production, `'unsafe-eval'` only in
+  development). `tests/routes.test.ts` keeps its nonce-uniqueness and
+  CSP-propagation assertions.
+- `tests/test_verify_runtime_hardening.py` splits `docker-compose.yml` into
+  service blocks and asserts the logging anchor on all 15 services, the exact
+  content of both anchors, that `<<: *api_hardening` appears on exactly the three
+  API services, and that they still carry `no-new-privileges`. It deliberately
+  avoids a YAML dependency so the pinned CI check set is unchanged.
+- `docker compose --profile "*" config` resolves with 15 services, exactly three
+  `read_only` entries and the shared log options on all of them.
 
 ## Residuals
 
@@ -71,10 +70,10 @@ They still get the log rotation from the shared logging block.
   work in the files that would change (`app/main.py`, `src/api/main.py`,
   `app/api/**`). That change must wait for those trees to settle; blocking it at
   a proxy would only cover the Telegram edge, not the loopback ports.
-- CSP still allows inline scripts/styles; a nonce-based policy needs per-request
-  middleware.
 - HSTS is not set: the supported dashboard origin is plain-HTTP loopback and
   `__Host-` cookie names are still dormant until an HTTPS origin exists.
 - Workers, PostgreSQL and Redis are not read-only and carry no PID/memory
   limits beyond the log rotation.
 - Container images remain tag-pinned rather than digest-pinned.
+- `AgentHub`'s Dockerfile does not set `PYTHONDONTWRITEBYTECODE=1`, so under
+  `read_only` every import attempts a `.pyc` write that the interpreter ignores.
