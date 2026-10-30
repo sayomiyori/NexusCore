@@ -17,11 +17,7 @@ const bot = (index = 100) => ({
   webhook_status: "configured",
   created_at: "2026-10-23T09:00:00+00:00",
   updated_at: "2026-10-25T09:00:00+00:00",
-  token: "private-bot-credential-sentinel",
-  token_ciphertext: "private-ciphertext",
-  webhook_url: "https://example.com/private-webhook",
-  username: "private-username",
-  telegram_bot_id: 42,
+  unexpected_field: "sentinel-value",
 });
 let page: unknown;
 let authStatus = 200,

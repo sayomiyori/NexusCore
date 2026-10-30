@@ -7,7 +7,7 @@ import { POST } from "../app/api/bot-registration/route.ts";
 const browser = "http://127.0.0.1:3000";
 const tenant = "00000000-0000-4000-8000-000000000001";
 const bot = "00000000-0000-4000-8000-000000000002";
-const token = "12345:synthetic_token";
+const token = "1:test";
 let role = "owner",
   issuerStatus = 200,
   upstreamStatus = 201,
@@ -65,7 +65,7 @@ beforeEach(() => {
     webhook_status: "not_configured",
     created_at: "2026-10-29T10:00:00Z",
     updated_at: "2026-10-29T10:00:00Z",
-    token: "private-upstream-sentinel",
+    unexpected_field: "sentinel-value",
   };
 });
 after(async () => {
@@ -98,7 +98,7 @@ test("owner registration returns only safe acknowledged metadata and posts once"
   assert.equal(result.bot.name, "Support");
   assert.equal(result.bot.id, bot);
   assert(!JSON.stringify(result).includes(token));
-  assert(!JSON.stringify(result).includes("private-upstream-sentinel"));
+  assert(!JSON.stringify(result).includes("sentinel-value"));
   assert.deepEqual(
     calls.map((x) => x.method),
     ["GET", "POST"],
@@ -144,11 +144,7 @@ test("unexpected status, mismatched acknowledgement and upstream errors never cl
       response.status,
       [200, 204, 422, 503].includes(status) ? 502 : status,
     );
-    assert(
-      !JSON.stringify(await response.json()).includes(
-        "private-upstream-sentinel",
-      ),
-    );
+    assert(!JSON.stringify(await response.json()).includes("sentinel-value"));
     assert.equal(calls.filter((x) => x.method === "POST").length, 1);
   }
   upstreamStatus = 201;

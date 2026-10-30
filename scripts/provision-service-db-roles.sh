@@ -26,9 +26,9 @@ BEGIN
 END
 $$;
 
-ALTER ROLE auth_service PASSWORD :'auth_pw';
-ALTER ROLE webhook_service PASSWORD :'webhook_pw';
-ALTER ROLE agent_service PASSWORD :'agent_pw';
+SELECT format('ALTER ROLE %I PASSWORD %L', 'auth_service', :'auth_pw') \gexec
+SELECT format('ALTER ROLE %I PASSWORD %L', 'webhook_service', :'webhook_pw') \gexec
+SELECT format('ALTER ROLE %I PASSWORD %L', 'agent_service', :'agent_pw') \gexec
 
 ALTER DATABASE authfortress OWNER TO auth_service;
 ALTER DATABASE webhook_manager OWNER TO webhook_service;

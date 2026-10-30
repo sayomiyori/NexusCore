@@ -30,7 +30,7 @@ if __package__:
 else:
     import verify_stack as smoke
 
-TOKEN = "123456:synthetic_VERIFICATION-send-token"
+TOKEN = "1:test"
 WORKERS = ("webhook_worker", "agent_worker", "agent_publisher", "webhook_sender")
 
 

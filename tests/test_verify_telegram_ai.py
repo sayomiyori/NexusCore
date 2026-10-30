@@ -236,7 +236,7 @@ class ControlledAISmokeTests(unittest.TestCase):
         result = engine.connect.return_value.__enter__.return_value.execute.return_value
         payload = {"chat_id": 17, "text": "Synthetic sender answer"}
         try:
-            with patch.dict(os.environ, DATABASE_URL="postgresql+asyncpg://smoke:synthetic@postgres:5432/webhook_test"), \
+            with patch.dict(os.environ, DATABASE_URL="postgresql+asyncpg://postgres:5432/webhook_test"), \
                     patch("sqlalchemy.create_engine", return_value=engine) as database:
                 for state in (("unknown", None), ("processing", None)):
                     result.one.return_value = state
