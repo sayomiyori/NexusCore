@@ -7,6 +7,21 @@ volumes:
   nexus_redis_data:
   nexus_agent_uploads:
 
+# Shared container defaults: unbounded json-file logs can fill the host disk.
+x-default-logging: &default_logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# API containers only serve HTTP; they never need a writable root filesystem or
+# Linux capabilities. Workers and datastores are intentionally excluded.
+x-api-hardening: &api_hardening
+  read_only: true
+  cap_drop: ["ALL"]
+  tmpfs: ["/tmp"]
+  pids_limit: 256
+
 services:
 
   #ЕДИНАЯ ИНФРА
@@ -14,6 +29,7 @@ services:
     image: pgvector/pgvector:pg16
     container_name: nexus-postgres
     restart: unless-stopped
+    logging: *default_logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
@@ -37,6 +53,7 @@ services:
     image: redis:7-alpine
     container_name: nexus-redis
     restart: unless-stopped
+    logging: *default_logging
     command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""]
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
@@ -59,6 +76,8 @@ services:
       dockerfile: Dockerfile
     container_name: nexus-auth
     restart: unless-stopped
+    logging: *default_logging
+    <<: *api_hardening
     security_opt: ["no-new-privileges:true"]
     command: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers"
     depends_on:
@@ -90,6 +109,8 @@ services:
       dockerfile: Dockerfile
     container_name: nexus-webhook-api
     restart: unless-stopped
+    logging: *default_logging
+    <<: *api_hardening
     security_opt: ["no-new-privileges:true"]
     command: sh -c "python -m alembic upgrade head && exec uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers"
     depends_on:
@@ -133,6 +154,7 @@ services:
       dockerfile: Dockerfile
     container_name: nexus-webhook-worker
     restart: unless-stopped
+    logging: *default_logging
     command: celery -A src.infrastructure.queue.celery_app worker --loglevel=info --concurrency=2
     depends_on:
       webhook_service:
@@ -162,6 +184,7 @@ services:
       context: ../WebHook_Manager
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default_logging
     command: python -m scripts.recover_legacy_deliveries
     depends_on:
       webhook_service:
@@ -183,6 +206,7 @@ services:
       context: ../WebHook_Manager
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default_logging
     command: python -m scripts.recover_platform_outbox
     depends_on:
       webhook_service:
@@ -210,6 +234,8 @@ services:
       dockerfile: Dockerfile
     container_name: nexus-agent-api
     restart: unless-stopped
+    logging: *default_logging
+    <<: *api_hardening
     security_opt: ["no-new-privileges:true"]
     # The integrated root must not run AgentHub's unauthenticated standalone API.
     command: sh -c "python /app/agent_platform_preflight.py && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"
@@ -254,6 +280,7 @@ services:
       dockerfile: Dockerfile
     container_name: nexus-agent-worker
     restart: unless-stopped
+    logging: *default_logging
     command: celery -A app.workers.embed_worker.celery_app worker --loglevel=info --concurrency=2
     depends_on:
       agent_service:
@@ -279,6 +306,7 @@ services:
       context: ../AgentHub
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default_logging
     command: celery -A app.workers.telegram_worker:celery_app worker --loglevel=info --concurrency=2 --queues=telegram_ai
     depends_on: &agent_platform_dependencies
       agent_service:
@@ -292,6 +320,7 @@ services:
     profiles: [telegram-ai]
     build: *agent_platform_build
     restart: unless-stopped
+    logging: *default_logging
     command: python -m scripts.recover_telegram_jobs
     depends_on: *agent_platform_dependencies
     environment:
@@ -303,6 +332,7 @@ services:
     profiles: [telegram-ai]
     build: *agent_platform_build
     restart: unless-stopped
+    logging: *default_logging
     command: celery -A app.workers.telegram_reply_worker:celery_app worker --loglevel=info --concurrency=2 --queues=telegram_replies
     depends_on: *agent_platform_dependencies
     environment:
@@ -314,6 +344,7 @@ services:
     profiles: [telegram-ai]
     build: *agent_platform_build
     restart: unless-stopped
+    logging: *default_logging
     command: python -m scripts.recover_telegram_replies
     depends_on: *agent_platform_dependencies
     environment:
@@ -327,6 +358,7 @@ services:
       context: ../WebHook_Manager
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default_logging
     command: celery -A src.infrastructure.queue.celery_app:celery_app worker --loglevel=info --concurrency=2 --queues=telegram_send
     depends_on: &webhook_sender_dependencies
       webhook_service:
@@ -353,6 +385,7 @@ services:
     profiles: [telegram-ai]
     build: *webhook_sender_build
     restart: unless-stopped
+    logging: *default_logging
     command: python -m scripts.recover_telegram_answers
     depends_on: *webhook_sender_dependencies
     environment: *webhook_sender_environment
