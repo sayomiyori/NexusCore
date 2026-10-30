@@ -58,7 +58,9 @@ They still get the log rotation from the shared logging block.
   service blocks and asserts the logging anchor on all 15 services, the exact
   content of both anchors, that `<<: *api_hardening` appears on exactly the three
   API services, and that they still carry `no-new-privileges`. It deliberately
-  avoids a YAML dependency so the pinned CI check set is unchanged.
+  avoids a YAML dependency so the pinned CI check set is unchanged; that means
+  the test checks anchor placement, not YAML validity, which the manual
+  `docker compose config` step covers separately.
 - `docker compose --profile "*" config` resolves with 15 services, exactly three
   `read_only` entries and the shared log options on all of them.
 

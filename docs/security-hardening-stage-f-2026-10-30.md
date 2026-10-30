@@ -1,8 +1,9 @@
 # Stage F runtime and response hardening — acceptance (2026-10-30)
 
-Receipt for `specs/runtime-hardening.md`. Scope is NexusCore-owned files only:
-`dashboard/proxy.ts` and `docker-compose.yml`. No sibling service source tree was
-modified and the live `nexus_net` stack was not recreated.
+Receipt for `specs/runtime-hardening.md`. Functional scope is `dashboard/proxy.ts`
+and `docker-compose.yml`, with `dashboard/next.config.ts` reverted to its previous
+state and the two verification tests and the docs updated alongside. No sibling
+service source tree was modified and the live `nexus_net` stack was not recreated.
 
 ## Dashboard headers — what actually changed
 
@@ -71,9 +72,9 @@ matters.
 
 ## Not covered
 
-- Backend `/docs`, `/redoc`, `/openapi.json` and `/metrics` gating in AuthFortress
-  and WebHook Manager: blocked on those repositories settling their uncommitted
-  work in the files that would change.
+- Backend `/docs`, `/redoc`, `/openapi.json` and `/metrics` gating in
+  AuthFortress, WebHook Manager and AgentHub: blocked on those repositories
+  settling their uncommitted work in the files that would change.
 - No live-stack recreate, so the new Compose defaults are not yet active in the
   running demo containers.
 - HSTS, digest pinning and worker/datastore limits stay residuals.

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { NextRequest } from "next/server.js";
+import nextConfig from "../next.config.ts";
 import { proxy } from "../proxy.ts";
 
 const browser = "http://127.0.0.1:3000";
@@ -44,6 +45,11 @@ test("the nonce policy is strict in production and relaxed only in dev", () => {
   assert.match(policy, /object-src 'none'/);
   assert.match(policy, /base-uri 'none'/);
   assert.match(policy, /form-action 'self'/);
+  assert.match(policy, /default-src 'self'/);
+  assert.match(policy, /img-src 'self' data:/);
+  assert.match(policy, /style-src 'self' 'nonce-[^']+'/);
+  assert.match(policy, /font-src 'self'/);
+  assert.match(policy, /connect-src 'self'/);
   assert(!policy.includes("unsafe-"));
 
   Object.assign(process.env, { NODE_ENV: "development" });
@@ -57,4 +63,10 @@ test("every response carries a fresh nonce", () => {
   const first = proxy(request()).headers.get("content-security-policy");
   const second = proxy(request()).headers.get("content-security-policy");
   assert.notEqual(first, second);
+});
+
+test("the response headers live only in the middleware", () => {
+  const config = nextConfig as { headers?: unknown; poweredByHeader?: boolean };
+  assert.equal(config.headers, undefined);
+  assert.equal(config.poweredByHeader, false);
 });
