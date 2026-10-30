@@ -21,7 +21,8 @@ a usable public origin and real-destination dry-run remain required.
 The edge permits only `POST /webhooks/telegram/<registered bot UUID>` and forwards
 it to WebHook Manager. Other bots, query strings, encoded path aliases, management
 APIs, docs and health endpoints are unavailable through the edge. Requests are
-limited to 1 MiB with network inactivity timeouts and 16 concurrent requests. These
+limited to 1 MiB with network inactivity timeouts and 16 concurrent requests per
+client key (`CF-Connecting-IP` or peer address). These
 timeouts are not an absolute request deadline. Only
 content metadata and the Telegram secret header reach the API; the API remains
 responsible for secret authentication and tenant checks. Request logs are disabled.

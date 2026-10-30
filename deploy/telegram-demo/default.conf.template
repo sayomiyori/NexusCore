@@ -6,7 +6,12 @@ upstream telegram_intake {
     server webhook_service:8000 resolve;
 }
 
-limit_conn_zone $server_name zone=telegram_demo:64k;
+map $http_cf_connecting_ip $telegram_client {
+    default $http_cf_connecting_ip;
+    "" $binary_remote_addr;
+}
+
+limit_conn_zone $telegram_client zone=telegram_demo:64k;
 
 server {
     listen 8080;
