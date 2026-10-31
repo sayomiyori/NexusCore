@@ -9,15 +9,10 @@ COMPOSE = ROOT / "docker-compose.yml"
 ENV_EXAMPLE = ROOT / ".env.example"
 
 API_SERVICES = {"auth_service", "webhook_service", "agent_service"}
-SERVICES = {
-    "postgres",
-    "redis",
-    "auth_service",
-    "webhook_service",
+WORKERS = {
     "webhook_worker",
     "webhook_delivery_recovery",
     "webhook_outbox_recovery",
-    "agent_service",
     "agent_worker",
     "agent_telegram_worker",
     "agent_telegram_recovery",
@@ -26,7 +21,14 @@ SERVICES = {
     "webhook_sender",
     "webhook_send_recovery",
 }
+SERVICES = {
+    "postgres",
+    "redis",
+    *API_SERVICES,
+    *WORKERS,
+}
 SERVICE_HEADER = re.compile(r"^  ([a-z][a-z0-9_]*):$", re.MULTILINE)
+DIGEST = re.compile(r"^\s+image:\s+\S+@sha256:[0-9a-f]{64}$", re.MULTILINE)
 
 
 def blocks(text: str) -> dict[str, str]:
@@ -74,9 +76,18 @@ class RuntimeHardeningTests(unittest.TestCase):
                 f"{name} is missing the shared logging block",
             )
 
+    def anchor(self, name: str) -> str:
+        start = self.text.index(f"{name}:")
+        rest = self.text[start:]
+        ends = [
+            index
+            for index in (rest.find("\nx-", 1), rest.find("\nservices:\n"))
+            if index != -1
+        ]
+        return rest[: min(ends)]
+
     def test_only_api_services_are_read_only_and_capability_free(self) -> None:
-        anchor = self.text[self.text.index("x-api-hardening:") :]
-        anchor = anchor[: anchor.index("\nservices:\n")]
+        anchor = self.anchor("x-api-hardening")
         self.assertIn("read_only: true", anchor)
         self.assertIn('cap_drop: ["ALL"]', anchor)
         self.assertIn('tmpfs: ["/tmp"]', anchor)
@@ -93,11 +104,35 @@ class RuntimeHardeningTests(unittest.TestCase):
                 self.services[name],
                 name,
             )
-        for name, block in self.services.items():
-            if name in API_SERVICES:
-                continue
+
+    def test_workers_drop_capabilities_without_a_read_only_root(self) -> None:
+        anchor = self.anchor("x-worker-hardening")
+        self.assertIn('cap_drop: ["ALL"]', anchor)
+        self.assertIn('tmpfs: ["/tmp"]', anchor)
+        self.assertIn("pids_limit: 256", anchor)
+        self.assertNotIn("read_only", anchor)
+        hardened = {
+            name
+            for name, block in self.services.items()
+            if "<<: *worker_hardening" in block
+        }
+        self.assertEqual(hardened, WORKERS)
+        for name in WORKERS:
+            self.assertNotIn("read_only", self.services[name], name)
+
+    def test_datastores_have_no_capability_or_filedsystem_changes(self) -> None:
+        for name, expected in (("postgres", "512"), ("redis", "128")):
+            block = self.services[name]
+            self.assertIn(f"pids_limit: {expected}", block, name)
             self.assertNotIn("read_only", block, name)
             self.assertNotIn("cap_drop", block, name)
+
+    def test_external_images_are_pinned_by_digest(self) -> None:
+        for path in (COMPOSE, ROOT / "docker-compose.telegram-demo.yml"):
+            images = re.findall(r"^\s+image:\s+(\S+)$", path.read_text(encoding="utf-8"), re.MULTILINE)
+            self.assertTrue(images, path.name)
+            for image in images:
+                self.assertRegex(image, r"@sha256:[0-9a-f]{64}$", f"{path.name}: {image}")
 
 
 if __name__ == "__main__":

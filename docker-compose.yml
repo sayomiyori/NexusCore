@@ -22,14 +22,22 @@ x-api-hardening: &api_hardening
   tmpfs: ["/tmp"]
   pids_limit: 256
 
+# Workers need no capabilities either, but they keep a writable root filesystem
+# because Celery/bytecode/spool writes are not worth pinning down yet.
+x-worker-hardening: &worker_hardening
+  cap_drop: ["ALL"]
+  tmpfs: ["/tmp"]
+  pids_limit: 256
+
 services:
 
-  #ЕДИНАЯ ИНФРА
+  #Р•Р”РРќРђРЇ РРќР¤Р Рђ
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
     container_name: nexus-postgres
     restart: unless-stopped
     logging: *default_logging
+    pids_limit: 512
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
@@ -50,10 +58,11 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
     container_name: nexus-redis
     restart: unless-stopped
     logging: *default_logging
+    pids_limit: 128
     command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""]
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
@@ -69,7 +78,7 @@ services:
       timeout: 5s
       retries: 5
 
-  #МИКРОСЕРВИС АВТОРИЗАЦИИ (AuthFortress)
+  #РњРРљР РћРЎР•Р Р’РРЎ РђР’РўРћР РР—РђР¦РР (AuthFortress)
   auth_service:
     build:
       context: ../AuthFortress
@@ -102,7 +111,7 @@ services:
       - nexus_net
 
 
-  #ШЛЮЗ ВЕБХУКОВ (WebHook_Manager)
+  #РЁР›Р®Р— Р’Р•Р‘РҐРЈРљРћР’ (WebHook_Manager)
   webhook_service:
     build:
       context: ../WebHook_Manager
@@ -155,6 +164,7 @@ services:
     container_name: nexus-webhook-worker
     restart: unless-stopped
     logging: *default_logging
+    <<: *worker_hardening
     command: celery -A src.infrastructure.queue.celery_app worker --loglevel=info --concurrency=2
     depends_on:
       webhook_service:
@@ -185,6 +195,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     logging: *default_logging
+    <<: *worker_hardening
     command: python -m scripts.recover_legacy_deliveries
     depends_on:
       webhook_service:
@@ -207,6 +218,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     logging: *default_logging
+    <<: *worker_hardening
     command: python -m scripts.recover_platform_outbox
     depends_on:
       webhook_service:
@@ -227,7 +239,7 @@ services:
       - nexus_net
 
 
-  #ИИ-МОЗГ И RAG (AgentHub)
+  #РР-РњРћР—Р“ Р RAG (AgentHub)
   agent_service:
     build:
       context: ../AgentHub
@@ -281,6 +293,7 @@ services:
     container_name: nexus-agent-worker
     restart: unless-stopped
     logging: *default_logging
+    <<: *worker_hardening
     command: celery -A app.workers.embed_worker.celery_app worker --loglevel=info --concurrency=2
     depends_on:
       agent_service:
@@ -307,6 +320,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     logging: *default_logging
+    <<: *worker_hardening
     command: celery -A app.workers.telegram_worker:celery_app worker --loglevel=info --concurrency=2 --queues=telegram_ai
     depends_on: &agent_platform_dependencies
       agent_service:
@@ -321,6 +335,7 @@ services:
     build: *agent_platform_build
     restart: unless-stopped
     logging: *default_logging
+    <<: *worker_hardening
     command: python -m scripts.recover_telegram_jobs
     depends_on: *agent_platform_dependencies
     environment:
@@ -333,6 +348,7 @@ services:
     build: *agent_platform_build
     restart: unless-stopped
     logging: *default_logging
+    <<: *worker_hardening
     command: celery -A app.workers.telegram_reply_worker:celery_app worker --loglevel=info --concurrency=2 --queues=telegram_replies
     depends_on: *agent_platform_dependencies
     environment:
@@ -345,6 +361,7 @@ services:
     build: *agent_platform_build
     restart: unless-stopped
     logging: *default_logging
+    <<: *worker_hardening
     command: python -m scripts.recover_telegram_replies
     depends_on: *agent_platform_dependencies
     environment:
@@ -359,6 +376,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     logging: *default_logging
+    <<: *worker_hardening
     command: celery -A src.infrastructure.queue.celery_app:celery_app worker --loglevel=info --concurrency=2 --queues=telegram_send
     depends_on: &webhook_sender_dependencies
       webhook_service:
@@ -386,6 +404,7 @@ services:
     build: *webhook_sender_build
     restart: unless-stopped
     logging: *default_logging
+    <<: *worker_hardening
     command: python -m scripts.recover_telegram_answers
     depends_on: *webhook_sender_dependencies
     environment: *webhook_sender_environment
