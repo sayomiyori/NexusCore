@@ -4,9 +4,13 @@ For root tooling regressions without Docker or sibling repositories, use
 [the standalone checks guide](local-checks.md). The GitHub Actions workflow
 runs those checks on Windows and Ubuntu; service/scanner acceptance remains below.
 
-Use the existing WebHook Manager virtualenv and locally cached service images:
+Use the existing WebHook Manager virtualenv and locally cached service images.
+The PostgreSQL and Redis references are digest-pinned, so the cache must contain
+exactly those digests before the driver runs (`--pull never`):
 
 ```powershell
+docker pull pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
+docker pull redis:7-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
 ../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_stack.py
 ../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_telegram_ai.py
 ../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_telegram_ai.py --scanners

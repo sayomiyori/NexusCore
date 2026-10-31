@@ -28,7 +28,7 @@ SERVICES = {
     *WORKERS,
 }
 SERVICE_HEADER = re.compile(r"^  ([a-z0-9][a-z0-9_.-]*):$", re.MULTILINE)
-DIGEST = re.compile(r"^@sha256:[0-9a-f]{64}$")
+PINNED_IMAGE = re.compile(r"^[^@\s]+@sha256:[0-9a-f]{64}$")
 SERVICE_OVERRIDE = re.compile(
     r"^    (cap_drop|tmpfs|pids_limit|read_only):", re.MULTILINE
 )
@@ -160,7 +160,7 @@ class RuntimeHardeningTests(unittest.TestCase):
                     images.append(code.split("image:", 1)[1].strip())
             self.assertTrue(images, path.name)
             for image in images:
-                self.assertRegex(image, r"^[^@\s]+@sha256:[0-9a-f]{64}$", f"{path.name}: {image}")
+                self.assertRegex(image, PINNED_IMAGE, f"{path.name}: {image}")
 
 
 if __name__ == "__main__":
