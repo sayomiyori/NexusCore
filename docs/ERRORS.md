@@ -371,3 +371,18 @@
   A targeted owned-fixture rehearsal restarted only its Redis and affected
   worker: Celery ping passed, the worker exited 0 before Redis exited 0, all
   14 containers stopped, and the four completed scanners never restarted.
+
+## 2026-10-31: Edge fixture missed per-client limits and exhausted network pools
+
+- Symptom: the edge driver could not start when Docker's default address pool
+  was exhausted. Its concurrency probe also passed with a shared server bucket,
+  leaving the per-client nginx change without a behavioural regression.
+- Cause: fixture networks relied on Docker's automatic allocation, and every
+  held/probed request used the same client identity. The uncommitted workaround
+  also retried unrelated startup failures and ignored failed retry cleanup.
+- Fix: choose two distinct private fixture subnets and retry only explicit pool
+  overlap errors, at most eight times, after successful owned-project cleanup.
+  Hold client A's 16 slots, then require A to fail while B and the peer key pass.
+- Detection: Docker-boundary regressions cover private subnet selection, bounded
+  collision recovery, unrelated failures and failed cleanup. The real isolated
+  driver exercises the client buckets without accessing deployment databases.

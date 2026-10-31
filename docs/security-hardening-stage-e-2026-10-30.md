@@ -226,3 +226,20 @@ only transport encryption is absent.
 yet regress per-client throttling on this host, and the `__Host-` branch was
 verified at server level rather than through a TLS browser. Neither limit
 weakens the implemented behaviour; both are covered by the proposed tests.
+
+## Edge driver follow-up — 2026-10-31
+
+The edge driver now carries the per-client regression proposed above: 16 held
+connections for A, a refused request for A, and successful requests for B and
+the peer-address bucket. Its two owned networks use explicit private subnets;
+only subnet collisions permit bounded startup retries, and retry cleanup must
+succeed. Unrelated Docker failures are not retried.
+
+The isolated driver passed using cached `python:3.12-slim` and the overlay's
+pinned nginx image. All 164 root unit tests, Ruff and compilation passed;
+five startup tests cover private ranges, collision recovery, retry bounds,
+unrelated failures and failed cleanup. See [the commands](local-checks.md).
+This closes the shipped edge-driver gap; the HTTPS browser and 2FA test
+residuals in this historical receipt are unchanged. A later optional negative
+Docker run could not start because the Docker engine had become unavailable;
+no attempt was made to restart the shared engine.

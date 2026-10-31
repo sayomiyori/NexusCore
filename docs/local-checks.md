@@ -21,8 +21,29 @@ Dependency installation requires package-index access. The tests themselves use
 mocked Docker/HTTP boundaries and disposable loopback listeners. They do not
 start a Docker stack or read the main deployment configuration.
 
-`.github/workflows/local-checks.yml` runs these checks on GitHub-hosted Ubuntu
-and Windows for relevant main pushes and pull requests, and allows manual runs.
+## Isolated Telegram edge check
+
+With Docker already available and a locally cached Python image, run:
+
+```powershell
+.venv/checks/Scripts/python.exe scripts/verify_telegram_edge.py --python-image python:3.12-slim
+```
+
+This starts only a uniquely named synthetic receiver/nginx project, without
+application `.env`, deployment storage or real provider traffic. Both fixture
+networks use explicit private subnets; a Docker pool-overlap error permits up to
+eight startup attempts, with successful owned cleanup required between attempts.
+Other startup errors fail immediately. The driver removes its own containers
+and networks on exit and does not prune volumes or foreign resources.
+
+The concurrency check holds all 16 slots for client A, requires 503 for A and
+202 for client B and a request without the proxy client header. This detects a
+regression to a shared server bucket. It does not establish the trustworthiness
+of client headers on a live network or verify a real Cloudflare tunnel.
+
+`.github/workflows/local-checks.yml` runs the root unit, lint and compilation
+checks on GitHub-hosted Ubuntu and Windows for relevant main pushes and pull
+requests, and allows manual runs. It does not run the Docker edge driver.
 Workflow permissions are read-only; checkout credentials are not persisted.
 
 These checks cover verification-tool regressions. For actual service/scanner
