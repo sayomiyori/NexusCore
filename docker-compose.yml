@@ -28,10 +28,11 @@ x-worker-hardening: &worker_hardening
   cap_drop: ["ALL"]
   tmpfs: ["/tmp"]
   pids_limit: 256
+  security_opt: ["no-new-privileges:true"]
 
 services:
 
-  #Р•Р”РРќРђРЇ РРќР¤Р Рђ
+  #ЕДИНАЯ ИНФРА
   postgres:
     image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
     container_name: nexus-postgres
@@ -78,7 +79,7 @@ services:
       timeout: 5s
       retries: 5
 
-  #РњРРљР РћРЎР•Р Р’РРЎ РђР’РўРћР РР—РђР¦РР (AuthFortress)
+  #МИКРОСЕРВИС АВТОРИЗАЦИИ (AuthFortress)
   auth_service:
     build:
       context: ../AuthFortress
@@ -111,7 +112,7 @@ services:
       - nexus_net
 
 
-  #РЁР›Р®Р— Р’Р•Р‘РҐРЈРљРћР’ (WebHook_Manager)
+  #ШЛЮЗ ВЕБХУКОВ (WebHook_Manager)
   webhook_service:
     build:
       context: ../WebHook_Manager
@@ -239,7 +240,7 @@ services:
       - nexus_net
 
 
-  #РР-РњРћР—Р“ Р RAG (AgentHub)
+  #ИИ-МОЗГ И RAG (AgentHub)
   agent_service:
     build:
       context: ../AgentHub

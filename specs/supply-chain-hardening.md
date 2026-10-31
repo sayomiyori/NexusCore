@@ -23,7 +23,8 @@ locally, not pulled.
 ## Worker containers
 
 `x-worker-hardening` (`cap_drop: ["ALL"]`, `tmpfs: ["/tmp"]`,
-`pids_limit: 256`) is applied to all ten worker and recovery services:
+`pids_limit: 256`, `security_opt: ["no-new-privileges:true"]`) is applied to all
+ten worker and recovery services:
 `webhook_worker`, `webhook_delivery_recovery`, `webhook_outbox_recovery`,
 `agent_worker`, `agent_telegram_worker`, `agent_telegram_recovery`,
 `agent_reply_worker`, `agent_reply_recovery`, `webhook_sender`,
@@ -41,12 +42,17 @@ both need writable data volumes.
 
 ## Verification
 
-- `tests/test_verify_runtime_hardening.py` now has seven checks: required
+- `tests/test_verify_runtime_hardening.py` now has eight checks: required
   PostgreSQL credentials, the bounded logging anchor on all 15 services, the
   API anchor on exactly the three API services, the worker anchor on exactly the
-  ten workers with no `read_only`, datastore `pids_limit` values with no
-  capability/filesystem changes, and a digest on every external `image:` line in
-  both Compose files.
+  ten workers with no `read_only`, no service-level override of a shared
+  hardening key, datastore `pids_limit` values with no capability/filesystem
+  changes, and a digest on every external `image:` line in both Compose files
+  (inline comments are stripped before matching, so a floating image with a
+  trailing comment cannot hide).
+- `scripts/verify_stack.py` and the `docker pull` line in
+  `docs/telegram-demo.md` use the same pinned references, so the documented
+  pull and the isolated smoke stack stay byte-identical to what Compose runs.
 - Dynamic check: the built `webhook_worker` and `agent_worker` images were run
   with `--cap-drop ALL --tmpfs /tmp --pids-limit 256
   --security-opt no-new-privileges:true` against disposable PostgreSQL/Redis

@@ -20,8 +20,9 @@ runtime test if any `image:` line lacks a `@sha256:` pin.
 ## Worker and datastore limits
 
 - `x-worker-hardening` (`cap_drop: ["ALL"]`, `tmpfs: ["/tmp"]`,
-  `pids_limit: 256`) on exactly the ten worker/recovery services; none of them
-  became `read_only`.
+  `pids_limit: 256`, `security_opt: ["no-new-privileges:true"]`) on exactly the
+  ten worker/recovery services; none of them became `read_only`, and no service
+  overrides a shared hardening key.
 - `postgres` `pids_limit: 512`, `redis` `pids_limit: 128`; no `cap_drop` or
   `read_only` on either, because the PostgreSQL entrypoint needs
   `CHOWN`/`SETUID`/`SETGID` during init and both need writable data volumes.
@@ -40,8 +41,13 @@ Built images were started against disposable `pgvector/pgvector:pg16` (with
 | `agent_worker` | same | `Connected to redis://hardredis:6379/3`, `celery@15ca331b8b46 ready.`, container running |
 
 `grep CapEff /proc/1/status` returned `0000000000000000` in both, i.e. the
-process really ran with an empty effective capability set. Containers and their
-synthetic env were deleted afterwards.
+process really ran with an empty effective capability set. The probe used the
+same flags the anchor now ships (`no-new-privileges` included). Containers and
+their synthetic env were deleted afterwards.
+
+The `docker pull` line in `docs/telegram-demo.md` and the image constants in
+`scripts/verify_stack.py` use the same pinned references, so the documented
+pull and the isolated smoke stack match what Compose runs.
 
 ## Not covered
 

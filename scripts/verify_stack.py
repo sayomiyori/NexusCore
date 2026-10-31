@@ -31,8 +31,8 @@ IMAGES = {
     "auth": "sha256:65256cebecb84ac274ad7726bcc12286ea8464f22651a2748f37f07dd45c5a6a",
     "web": "sha256:7cae10258f593cf22149130b306181ce26fa910542b96dc60582be9c333634d4",
     "agent": "sha256:2daa64d236fe947f52498260a852ea402a4f2fd74ffbc9d033da67a1c80c8b03",
-    "postgres": "pgvector/pgvector:pg16",
-    "redis": "redis:7-alpine",
+    "postgres": "pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a",
+    "redis": "redis:7-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f",
 }
 AGENT_REVISIONS = ("003_tenant_resources", "004_merge_ai_resources")
 KINDS = {"postgres": "postgres", "redis": "redis", "callback": "web",

@@ -27,8 +27,14 @@ SERVICES = {
     *API_SERVICES,
     *WORKERS,
 }
-SERVICE_HEADER = re.compile(r"^  ([a-z][a-z0-9_]*):$", re.MULTILINE)
-DIGEST = re.compile(r"^\s+image:\s+\S+@sha256:[0-9a-f]{64}$", re.MULTILINE)
+SERVICE_HEADER = re.compile(r"^  ([a-z0-9][a-z0-9_.-]*):$", re.MULTILINE)
+DIGEST = re.compile(r"^@sha256:[0-9a-f]{64}$")
+SERVICE_OVERRIDE = re.compile(
+    r"^    (cap_drop|tmpfs|pids_limit|read_only):", re.MULTILINE
+)
+WORKER_OVERRIDE = re.compile(
+    r"^    (cap_drop|tmpfs|pids_limit|read_only|security_opt):", re.MULTILINE
+)
 
 
 def blocks(text: str) -> dict[str, str]:
@@ -110,6 +116,7 @@ class RuntimeHardeningTests(unittest.TestCase):
         self.assertIn('cap_drop: ["ALL"]', anchor)
         self.assertIn('tmpfs: ["/tmp"]', anchor)
         self.assertIn("pids_limit: 256", anchor)
+        self.assertIn('security_opt: ["no-new-privileges:true"]', anchor)
         self.assertNotIn("read_only", anchor)
         hardened = {
             name
@@ -120,6 +127,23 @@ class RuntimeHardeningTests(unittest.TestCase):
         for name in WORKERS:
             self.assertNotIn("read_only", self.services[name], name)
 
+    def test_no_service_overrides_the_shared_hardening(self) -> None:
+        for name in WORKERS:
+            self.assertIsNone(
+                WORKER_OVERRIDE.search(self.services[name]),
+                f"{name} overrides a shared hardening key",
+            )
+        for name in API_SERVICES:
+            self.assertIsNone(
+                SERVICE_OVERRIDE.search(self.services[name]),
+                f"{name} overrides a shared hardening key",
+            )
+            self.assertIn(
+                '    security_opt: ["no-new-privileges:true"]',
+                self.services[name],
+                name,
+            )
+
     def test_datastores_have_no_capability_or_filedsystem_changes(self) -> None:
         for name, expected in (("postgres", "512"), ("redis", "128")):
             block = self.services[name]
@@ -129,10 +153,14 @@ class RuntimeHardeningTests(unittest.TestCase):
 
     def test_external_images_are_pinned_by_digest(self) -> None:
         for path in (COMPOSE, ROOT / "docker-compose.telegram-demo.yml"):
-            images = re.findall(r"^\s+image:\s+(\S+)$", path.read_text(encoding="utf-8"), re.MULTILINE)
+            images = []
+            for line in path.read_text(encoding="utf-8").splitlines():
+                code = line.split("#", 1)[0].rstrip()
+                if code.strip().startswith("image:"):
+                    images.append(code.split("image:", 1)[1].strip())
             self.assertTrue(images, path.name)
             for image in images:
-                self.assertRegex(image, r"@sha256:[0-9a-f]{64}$", f"{path.name}: {image}")
+                self.assertRegex(image, r"^[^@\s]+@sha256:[0-9a-f]{64}$", f"{path.name}: {image}")
 
 
 if __name__ == "__main__":
