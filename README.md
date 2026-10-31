@@ -24,7 +24,7 @@ Telegram → WebHook Manager → Celery / Redis → AgentHub → Telegram
            AuthFortress identity
 ```
 
-EventPipe and PipeWatch provide separate event and log pipelines. The opt-in Telegram → Groq → Telegram path was verified in an isolated live demo on 2026-10-08. Platform-wide identity enforcement and the event/log integration remain incomplete.
+EventPipe and PipeWatch provide separate event and log pipelines. The opt-in Telegram → Groq → Telegram path was verified in an isolated live demo on 2026-10-08. Tenant authorization is implemented in opt-in service modes; connecting the event/log services to the root remains planned. The recorded 2026-10-13 local root release kept platform modes and live traffic disabled.
 
 ## Local development
 
@@ -38,21 +38,38 @@ workspace/
 └── AgentHub/
 ```
 
-Install Docker Desktop with Compose, clone those repositories into the layout above, then run these commands from `NexusCore` in PowerShell:
+For a fresh stack with empty volumes, install Docker Desktop with Compose and
+clone those repositories into the layout above. Run these commands from
+`NexusCore` in PowerShell. Existing data needs its own checked migration procedure;
+the updated local host uses the pinned restart procedure below.
 
 ```powershell
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 # Edit .env and set local credentials before starting the services.
 docker compose config --quiet
-docker compose up -d --build --wait --wait-timeout 180
+if ($LASTEXITCODE -ne 0) { throw 'Invalid Compose configuration' }
+docker compose build auth_service webhook_service webhook_worker agent_service agent_worker
+if ($LASTEXITCODE -ne 0) { throw 'Image build failed' }
+docker compose up -d --wait --wait-timeout 180 postgres redis
+if ($LASTEXITCODE -ne 0) { throw 'Infrastructure startup failed' }
+docker compose run --rm --no-deps --entrypoint python agent_service -m alembic upgrade head
+if ($LASTEXITCODE -ne 0) { throw 'AgentHub migration failed' }
+docker compose up -d --no-build --pull never --wait --wait-timeout 180 auth_service webhook_service webhook_worker agent_service agent_worker
+if ($LASTEXITCODE -ne 0) { throw 'Application startup failed' }
 docker compose ps
 ```
 
 The root stack binds its published ports to `127.0.0.1`: PostgreSQL on `localhost:25432`, Redis on `localhost:26379`, AuthFortress at `http://localhost:28080/docs`, WebHook Manager at `http://localhost:8001/docs`, and AgentHub at `http://localhost:8014/docs`. These ports and credentials are for local development. Do not expose this Compose setup as a production deployment.
 
-Set both signing secrets to independent random values of at least 32 characters. Use URL-safe local database credentials because Compose interpolates them into connection URLs. Groq credentials are optional for startup and required for real generation. Without a Gemini key, AgentHub uses its existing deterministic fallback embeddings; these do not verify semantic retrieval quality.
+Set both signing secrets to independent random values of at least 32 characters. Use URL-safe local database credentials because Compose interpolates them into connection URLs. Groq credentials are optional for startup and required for real generation. Embedding availability and provenance depend on the selected AgentHub revision; consult its configuration and migration contract before indexing. The historical local release used deterministic fallback embeddings, which do not verify semantic retrieval quality.
 
-AuthFortress and WebHook Manager apply their existing forward Alembic migrations before starting their APIs. AgentHub keeps legacy table creation for standalone startup; its opt-in Telegram mode requires an explicitly migrated platform schema. Database initialization runs only when the PostgreSQL volume is first created. AgentHub API and worker share an uploads volume.
+In this fresh-stack setup, AuthFortress and WebHook Manager apply forward Alembic
+migrations before starting their APIs. AgentHub requires the explicitly migrated
+resource schema even in standalone mode; startup table creation cannot replace
+that migration. Database initialization runs only when the PostgreSQL volume is
+first created. AgentHub API and worker share an uploads volume. Existing uploads
+must grant UID/GID 10001 access before running the new images; ownership changes
+require a separate inventory and approval.
 
 For service-specific setup and tests, use the README in each service repository. EventPipe and PipeWatch are not started by the root Compose file.
 
@@ -70,16 +87,81 @@ audit records. The results describe this local probe, not production capacity.
 
 ## Verification status
 
-### Current module checkpoint — 2026-10-09
+### Published source checkpoints — 2026-10-31
 
-Latest verified service suites total **823 tests** (AuthFortress 192,
+The dashboard includes tenant reads, bot registration, webhook preparation,
+knowledge indexing status and persisted tenant/bot AI model settings. See
+[the unified release](docs/unified-release-2026-10-27.md),
+[bot registration](docs/dashboard-bot-registration-2026-10-29.md) and
+[webhook preview](docs/dashboard-webhook-preview-2026-10-29.md).
+Later source hardening is recorded in
+[Stage E acceptance](docs/security-hardening-stage-e-2026-10-30.md),
+[runtime hardening](specs/runtime-hardening.md) and
+[supply chain hardening](specs/supply-chain-hardening.md).
+Source publication and isolated acceptance do not establish adoption by the
+existing local deployment. Fresh root tooling checks are documented in
+[local checks](docs/local-checks.md).
+
+### Historical applied local release — 2026-10-13
+
+The recorded local acceptance covers **989 distinct tests**: AuthFortress 196,
+WebHook Manager 391, AgentHub 275, EventPipe 57 and PipeWatch 70. Configured
+Ruff/Mypy checks, isolated migration roundtrips, tenant isolation, worker recovery,
+built-image checks and independent reviews passed before the approved release.
+These are dated results, not a fresh CI run or production-readiness claim.
+
+The approved local update advanced WebHook to `8f3b1c6d2a90` and AgentHub to
+`003_tenant_resources`; AuthFortress remained at `004_tenants`. Previous data and
+metadata were preserved, legacy tenant assignments remain NULL, and the shared
+uploads volume received UID/GID 10001 while retaining file hashes and modes.
+The six selected application processes passed post-update checks. Telegram,
+provider and MCP traffic stayed closed. EventPipe/PipeWatch stayed standalone.
+This is a historical local receipt; the detailed operator report is retained
+locally as `docs/local-service-hardening-2026-10-12.md` and is not published.
+
+For that recorded deployment, retain all four local overrides in exactly this order;
+the hardening override must be last. They are local operational files, absent
+from a fresh clone. Validate without printing resolved environment values:
+
+```powershell
+$NexusComposeArgs = @(
+  'compose', '-f', 'docker-compose.yml',
+  '-f', '.venv/root-adoption.compose.yml',
+  '-f', '.venv/root-auth-update.compose.yml',
+  '-f', '.venv/root-delivery-recovery.compose.yml',
+  '-f', '.venv/root-local-hardening.compose.yml', '--profile', 'legacy-recovery'
+)
+docker @NexusComposeArgs config --quiet
+if ($LASTEXITCODE -ne 0) { throw 'Invalid pinned Compose configuration' }
+docker @NexusComposeArgs ps
+```
+
+After approval of the selected restart, use the same arguments and explicit
+services. Revalidate configuration immediately before the restart:
+
+```powershell
+docker @NexusComposeArgs config --quiet
+if ($LASTEXITCODE -ne 0) { throw 'Invalid pinned Compose configuration' }
+docker @NexusComposeArgs up -d --no-build --pull never --no-deps auth_service webhook_service webhook_worker webhook_delivery_recovery agent_service agent_worker
+```
+
+Do not use the original Compose file alone or rebuild implicitly against this
+host's existing data. Application restart is separate from migration, upload
+ownership changes and live activation. Backups were restored on isolated copies;
+their Windows-user encryption does not establish cross-host recovery. Public
+TLS/VPS, real OAuth/provider quality, OS-image vulnerability scanning and
+production capacity remain unverified.
+
+### Historical module checkpoint — 2026-10-09
+
+At this historical checkpoint, service suites totalled **823 tests** (AuthFortress 192,
 WebHook Manager 329, AgentHub 250, EventPipe 27, PipeWatch 25). Full configured
 Ruff checks and applicable CI Mypy scopes passed. Fresh independent reviews
 approved the scoped fixes after regression tests. The rebuilt local API/worker
 stack, controlled Telegram/AI/reply chain and restricted nginx edge passed.
 
 See [commands, performance measurements and remaining boundaries](docs/module-verification-2026-10-09.md).
-The checkpoint covers current modules; it does not establish public deployment,
+The checkpoint covers modules as of that date; it does not establish public deployment,
 tenant-safe legacy RAG, observability integration or exactly-once legacy delivery.
 Post-push CI passed for all five services. EventPipe now uses its existing
 SeaweedFS test Compose; all 27 tests, zero-skip enforcement and three Docker
@@ -92,7 +174,8 @@ WebHook suite passed. Interrupted claims require outcome reconciliation.
 
 ### Free AI providers
 
-Current Compose defaults to Groq and forwards `GROQ_API_KEY` to AgentHub.
+The base Compose file defaults to Groq and forwards `GROQ_API_KEY` to AgentHub;
+the updated host's final override empties provider credentials.
 `LLM_PROVIDER` and `LLM_MODEL` configure the standalone API and worker together;
 the opt-in Telegram path retains its separate `TELEGRAM_AI_MODEL`. Groq API
 authentication/model availability and direct generation through Gemini
@@ -150,18 +233,19 @@ independent issuer/context/ingress/reply keys. AgentHub receives no Telegram
 credential encryption key. Platform workers consume dedicated `telegram_ai`,
 `telegram_replies` and `telegram_send` queues; legacy workers keep their queues.
 
-AgentHub requires platform Alembic head before enabled startup. For a fresh empty
-AgentHub database, run `docker compose run --rm --no-deps agent_service python -m alembic upgrade head`
+AgentHub requires resource Alembic head before standalone or enabled startup. For a fresh empty
+AgentHub database, run `docker compose run --rm --no-deps --entrypoint python agent_service -m alembic upgrade head`
 after the database exists. An existing legacy database first
 requires comparison against the explicit legacy baseline and an approved baseline
 procedure; do not blindly stamp or upgrade it. Root Compose does not assign a
 baseline revision to existing data. WebHook Manager applies forward migrations
 before API startup.
 
-Validate with `docker compose --profile telegram-ai config --quiet`; after the
-schema prerequisite and separately approved live provisioning, start with
-`docker compose --profile telegram-ai up -d --build --wait`. Controlled tests
-alone do not authorize live publication.
+For a separately provisioned fresh stack, validate with
+`docker compose --profile telegram-ai config --quiet`. Enabling live features on
+the updated host requires a separately reviewed configuration and activation;
+the pinned restart above keeps them disabled. Controlled tests alone do not
+authorize live publication.
 
 For isolated controlled acceptance, use WebHook Manager's existing virtualenv
 and locally cached images. No external test database or host ports are needed:
@@ -202,18 +286,9 @@ approved procedure: AgentHub is at `002_telegram_ai` and WebHook Manager at
 copies before root writes. Legacy data, sequence state, ownership and privileges
 were preserved. The four AgentHub/WebHook application processes now use the
 verified images; API health and legacy worker pongs passed. AI/intake/reply flags
-remain disabled; no root live AI flow was enabled. On the verified local host,
-restart uses the retained `.venv/root-adoption.compose.yml`,
-`.venv/root-auth-update.compose.yml` and `.venv/root-delivery-recovery.compose.yml`
-overrides (not tracked, in that order) to pin the verified images and disabled
-flags. The last override was added with the approved recovery rollout below:
-
-```powershell
-docker compose -f docker-compose.yml -f .venv/root-adoption.compose.yml -f .venv/root-auth-update.compose.yml -f .venv/root-delivery-recovery.compose.yml up -d --no-build --pull never --no-deps agent_service agent_worker webhook_service webhook_worker webhook_delivery_recovery
-```
-
-This command describes that host's deployment, not a fresh-clone setup. Do not
-restart its old WebHook images against the new migration revision.
+remained disabled; no root live AI flow was enabled. Those revisions and image
+pins were subsequently replaced by the approved 2026-10-13 release above; use its
+complete override order for the updated host.
 
 On 2026-10-11, the separately approved
 [legacy delivery recovery rollout](docs/legacy-recovery-rollout-2026-10-11.md)
@@ -225,8 +300,8 @@ queue, API health/refusal checks pass and other root containers are unchanged.
 Inspect legacy pending destinations before future scanner activation, even when
 platform live flags are off.
 
-Tenant isolation is not implemented across the entire platform. Legacy webhook
-egress restrictions and public deployment remain open.
+The 2026-10-13 service acceptance supersedes the earlier isolation and legacy
+egress gaps. Root event/log integration and public deployment remain planned.
 NexusCore is a development demo workspace.
 
 The standalone stack smoke uses a new internal fixture with owned test storage,
@@ -259,13 +334,18 @@ Cloudflare origin for one registered bot. It includes an isolated nginx acceptan
 check and explicit preparation/cleanup instructions. It does not install a
 webhook or enable the root AI flow.
 
-1. Define a separately approved root opt-in acceptance before enabling the
-   verified [AI/reply flow](specs/telegram-ai-reply.md) there; schema adoption is complete.
-2. Close legacy egress restrictions and platform-wide isolation.
-3. Connect the event/log pipelines, dashboard and deployment setup.
+1. Keep live features disabled until a separately approved activation and current
+   [AI/reply flow](specs/telegram-ai-reply.md) acceptance.
+2. Verify public deployment, portable/off-host recovery and capacity when the
+   required infrastructure and access are available.
+3. Connect the event/log pipelines only as separately requested
+   roadmap work.
 
 The first platform read increment is implemented in AgentHub:
 [tenant-authorized AI job metadata and usage](specs/platform-ai-read.md).
 It uses fresh AuthFortress and bot-context checks and excludes private message
-content. `PLATFORM_READ_ENABLED` stays false by default; tenant RAG, cache and
-AI configuration remain separate work.
+content. `PLATFORM_READ_ENABLED` stays false by default. Tenant document/RAG,
+conversation, usage and cache isolation are implemented and covered by the
+2026-10-13 service acceptance. Persisted tenant/bot model selection is covered
+by the later [AI settings contract](specs/tenant-ai-settings.md); live provider
+activation remains separately authorized work.
