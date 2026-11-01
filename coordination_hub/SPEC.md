@@ -14,7 +14,21 @@ Two repository ids are configured for MCP use: `nexuscore` (`D:/Programming/Nexu
 
 Reservations and review are repository-qualified. `lock_files` and `get_file_owners` take `repository` and default to `nexuscore`; `lock_files` requires the calling agent's own worktree in that repository. `submit_for_review` verifies the calling agent's worktree of the *submitted* repository. The accepted location is fixed by convention, `<root>/.worktrees/<agent>` on branch `refs/heads/agent/<agent>`; the main checkout, a foreign path, an unregistered worktree, another branch, a linked or reparse-point path, a dirty tree or a revision other than `HEAD` all fail closed. A repository whose worktree does not exist yet is unusable for that agent, and the absence of another agent's worktree never blocks the calling agent's lease. Hub never creates a worktree of another repository.
 
-Repository worktrees for AuthFortress were registered from `main@116ffdb8`; the dirty AuthFortress main checkout is preserved unchanged and ignored through `.git/info/exclude`, not a tracked ignore file.
+Repository worktrees for AuthFortress were registered from `main@116ffdb8`. The original dirty AuthFortress main checkout is preserved and still visible; only the new `.worktrees/` directory is excluded locally through `.git/info/exclude`, not a tracked ignore file.
+
+## Task-local configuration
+
+`coordination_hub/profile_tool.py` prints the OpenCode `mcp.servers.nexus_hub` entry to stdout and nothing else:
+
+```text
+python -B coordination_hub/profile_tool.py --agent security [--database <hub.sqlite3>]
+```
+
+The agent must be `security` or `development`; the reviewer role does not reserve work. `--database` defaults to the live Hub database and accepts only paths the server already accepts: the live Hub database, a `hub.sqlite3` inside the temporary directory, or the synthetic connectivity database. The tool rejects links and reparse points on that path, requires an existing regular file, and validates it with the store's own schema check over a read-only SQLite URI, so a database carrying the expected application id and version but unrelated tables or triggers is refused. It also requires the emitted interpreter and server entry point to exist, and reuses the fixed worktree and branch verification. Diagnostics are static, so a failure never echoes arguments, environment values or database content.
+
+These are preflight checks. The server re-reads the same state when it starts, so a later change of database, worktree or branch is not prevented by the emission.
+
+The tool writes no file and edits no profile; a caller stores or injects the output itself, so it cannot change a running client or a global configuration.
 
 
 ## Backups and recovery
