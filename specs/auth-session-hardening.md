@@ -2,9 +2,10 @@
 
 Cross-service contract for the AuthFortress changes in this increment.
 
-Status of the current 2FA increment: verified in isolated local tests, no live
-rollout. See "Two-factor state changes" and "Acceptance evidence" below; the
-earlier Stage B material keeps its original scope.
+Status of the current 2FA and authentication audit privacy increments: verified
+in isolated local tests, no live rollout. See "Authentication audit privacy",
+"Two-factor state changes" and "Acceptance evidence" below; the earlier Stage B
+material keeps its original scope.
 
 ## JWT secret
 
@@ -48,8 +49,8 @@ Redis-restore/direct-DB-revocation gap.
   role/active change flags and the number of newly revoked sessions, but never
   passwords, tokens or email values. No-op updates do not write an audit row.
   Self-deletion writes a null actor to avoid a foreign-key failure after the
-  irreversible delete. Pre-existing registration/login audit rows still contain
-  the submitted email; that separate privacy change is not claimed here.
+  irreversible delete. The separate registration, OAuth and failed-login address
+  handling is described under authentication audit privacy below.
 
 ## OAuth linking
 
@@ -58,6 +59,32 @@ matching email returns `409` until an explicit, authenticated linking flow is
 implemented. Existing `(provider, provider_user_id)` links continue to log in.
 This closes the pre-registered-email pre-hijack; email verification remains a
 required follow-up for account-squatting and Yandex's unverified-email behavior.
+
+## Authentication audit privacy
+
+Status: implemented and accepted in the AuthFortress worktree as
+`a0b3c6640bd131b92d47e7df747d367203a527a1`; local acceptance only, no live
+rollout and no production data touched. New authentication audit rows no longer
+carry a plaintext address:
+
+- registration writes no address in the audit details and keeps the user UUID in
+  the audit row, so the event still identifies the account;
+- the OAuth callback keeps only the provider name plus the user UUID;
+- a failed login records the existing keyed, normalized subject: HMAC-SHA256 of
+  the trimmed, lowercased submitted address keyed with the JWT secret. Repeated
+  failures for one account still group, and the submitted address is neither
+  stored nor trivially recoverable from the row;
+- because that subject is keyed with the JWT secret, rotating the secret changes
+  every subject, so failed-login correlation ends at the rotation point by
+  design;
+- IP address and user agent are still recorded for authentication and audit
+  events. This change removes the address, not the rest of the request metadata,
+  which remains personal data.
+
+Scope is new writes only. Registration, OAuth and failed-login rows written
+before this change still contain the submitted address or the provider email;
+they are not rewritten or scrubbed and would need a separate, explicitly
+approved migration. Nothing here makes historical data clean.
 
 ## Two-factor state changes
 
@@ -118,11 +145,21 @@ fails thirteen of these regressions, so the tests discriminate the old behaviour
 This is local acceptance only: no live rollout, no deployment and no production
 data.
 
+The audit-privacy change `a0b3c664` extends that run to 234 tests passed on a
+fresh database, with Ruff and Mypy clean in the same worktree. The two earlier
+commits in the accepted range are `b24f486` for the validation-error payload
+handling and `cae0dac` for the 2FA session and step-up behaviour. The acceptance
+covers local tests only: it does not exercise live OAuth providers, production
+deployment, load, or a full dependency audit, and it does not cover rewriting
+historical audit rows.
+
 ## Residuals
 
 - No email verification or explicit OAuth linking flow yet.
 - OAuth-only accounts cannot enrol 2FA until a separate OAuth re-authentication
   flow exists.
+- Historical authentication audit rows still contain the submitted address or the
+  provider email; they are not scrubbed and need a separate approved migration.
 - Historical Stage B note: the integration tests of that stage required
   disposable PostgreSQL/Redis and were not part of the local unit pass at the
   time. The current isolated acceptance above ran against a real
