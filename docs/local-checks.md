@@ -21,6 +21,43 @@ Dependency installation requires package-index access. The tests themselves use
 mocked Docker/HTTP boundaries and disposable loopback listeners. They do not
 start a Docker stack or read the main deployment configuration.
 
+## Optional Windows coordination Hub checks
+
+The coordination Hub is a Windows-only local pilot, so this section is optional
+and leaves the cross-platform recipe above unchanged. It reuses the two existing
+requirement files and adds no pin to `requirements-checks.txt`.
+
+Host prerequisites are fixed and user-specific rather than generic: Git at
+`C:/Program Files/Git/cmd/git.exe`, the private PowerShell path hardcoded in
+`coordination_hub/persistent.py` (`_powershell`), currently
+`C:/Users/flamx/.cache/codex-runtimes/codex-primary-runtime/dependencies/native/powershell/pwsh.exe`,
+and Windows ACL support with restricted-owner directory creation. No sibling
+checkout, live Hub database, Docker stack or real agent worktree is needed: the
+tests create disposable Git repositories and temporary databases, and read no
+production coordination data.
+
+```powershell
+py -3.12 -m venv .venv/hub-checks
+.venv/hub-checks/Scripts/python.exe -m pip install -r requirements-checks.txt -r coordination_hub/requirements.txt
+.venv/hub-checks/Scripts/python.exe -m pip check
+.venv/hub-checks/Scripts/python.exe -m ruff check coordination_hub tests/coordination
+.venv/hub-checks/Scripts/python.exe -m compileall -q coordination_hub tests/coordination
+.venv/hub-checks/Scripts/python.exe -m unittest discover -s tests/coordination -p 'test_*.py' -v
+```
+
+Measured on 2026-11-02 with Python 3.12.10 and both requirement files installed:
+`pip check` reports no broken requirements, the lint and compile steps are clean,
+the root discovery command shown earlier in this document reports 164 tests, and
+the separate Hub discovery command in this section reports 73 tests.
+
+The optional Hub lint and compile commands here name both paths explicitly,
+because `coordination_hub` is runtime code that the unchanged CI workflow neither
+executes nor lints. The Hub suite also needs its own discovery because the root
+pattern `test_verify*.py` does not match its file names. This is not wired into
+`.github/workflows/local-checks.yml`, which keeps its current cross-platform
+scope and runs only the root unit, lint and compilation checks; no Linux or CI
+evidence is claimed for the Hub tests.
+
 ## Isolated Telegram edge check
 
 With Docker already available and a locally cached Python image, run:

@@ -1,0 +1,17 @@
+{
+  "mcp": {
+    "servers": {
+      "nexus_hub": {
+        "type": "local",
+        "command": [
+          "C:/Python314/python.exe",
+          "D:/Programming/NexusCore/.worktrees/development/coordination_hub/server.py",
+          "security",
+          "C:/Users/flamx/AppData/Local/Temp/nexuscore-hub-candidate/hub.sqlite3",
+          "D:/Programming/NexusCore/.worktrees/security"
+        ],
+        "disabled": false
+      }
+    }
+  }
+}
