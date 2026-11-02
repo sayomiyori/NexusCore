@@ -6,6 +6,10 @@ directory. The injection wrapper runs the real server with a patched
 without depending on any real agent worktree being present or clean. The
 production allowlist in ``identity.py`` stays fixed; nothing here is
 environment-configurable.
+
+An optional live-directory root patches ``coordination_hub.paths.live_directory``
+before the server starts, which lets the live-database startup tests run against
+a provisioned temporary directory instead of the real coordination directory.
 """
 import importlib.util
 import subprocess
@@ -15,14 +19,20 @@ from pathlib import Path
 GIT = 'C:/Program Files/Git/cmd/git.exe'
 AGENTS = ('security', 'development', 'codex')
 
-# sys.argv layout for `python -c INJECTION <server> <agent> <database> <worktree> <nexus_root> <auth_root>`.
+# sys.argv layout for
+# `python -c INJECTION <server> <agent> <database> <worktree> <nexus_root> <auth_root> <live_root>`.
+# live_root is empty unless the caller injects a provisioned live directory.
 INJECTION = '''import runpy, sys
 from pathlib import Path
-server, agent, database, worktree, nexus_root, auth_root = sys.argv[1:7]
+server, agent, database, worktree, nexus_root, auth_root, live_root = sys.argv[1:8]
 sys.path.insert(0, str(Path(server).parent))
 import identity
 identity.REPOSITORY_ROOTS['nexuscore'] = Path(nexus_root)
 identity.REPOSITORY_ROOTS['authfortress'] = Path(auth_root)
+if live_root:
+    sys.path.insert(0, str(Path(server).resolve().parent.parent))
+    import coordination_hub.paths as paths
+    paths.live_directory = lambda: Path(live_root)
 sys.argv = [server, agent, database, worktree]
 runpy.run_path(server, run_name='__main__')
 '''
@@ -36,17 +46,17 @@ def load(module_name, path):
     return module
 
 
-def injected_command(server, agent, database, worktree, nexus_root, auth_root):
+def injected_command(server, agent, database, worktree, nexus_root, auth_root, live_root=''):
     """Arguments for the stdio server with disposable repository roots injected."""
     return ['-B', '-c', INJECTION, str(server), agent, str(database), str(worktree),
-            str(nexus_root), str(auth_root)]
+            str(nexus_root), str(auth_root), str(live_root)]
 
 
-def injected_parameters(server, agent, database, worktree, nexus_root, auth_root):
+def injected_parameters(server, agent, database, worktree, nexus_root, auth_root, live_root=''):
     from mcp import StdioServerParameters
     return StdioServerParameters(
         command=sys.executable,
-        args=injected_command(server, agent, database, worktree, nexus_root, auth_root))
+        args=injected_command(server, agent, database, worktree, nexus_root, auth_root, live_root))
 
 
 class GitFixture:

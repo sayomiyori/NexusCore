@@ -3,7 +3,6 @@ import hashlib
 import json
 import sqlite3
 import subprocess
-import sys
 import tempfile
 import unittest
 import uuid
@@ -35,23 +34,23 @@ class MCPContractTests(unittest.TestCase):
         self.nexuscore = module.GitFixture(self.base / 'nexuscore')
         self.authfortress = module.GitFixture(self.base / 'authfortress')
 
-    def parameters(self, agent, database):
+    def parameters(self, agent, database, live_root='', worktree=None):
         """stdio server with disposable repository roots injected via runpy."""
-        return self.injected(SERVER, agent, database, self.nexuscore.worktree(agent),
-                             self.nexuscore.root, self.authfortress.root)
+        return self.injected(SERVER, agent, database, worktree or self.nexuscore.worktree(agent),
+                             self.nexuscore.root, self.authfortress.root, live_root)
+
+    def run_startup(self, agent, database, live_root='', worktree=None, timeout=60):
+        """Run the injected server once with a closed stdin and return the process result."""
+        parameters = self.parameters(agent, database, live_root, worktree)
+        return subprocess.run([parameters.command, *parameters.args], stdin=subprocess.DEVNULL,
+                              capture_output=True, timeout=timeout, check=False)
 
     def test_provisioned_live_database_starts(self):
         from coordination_hub.persistent import provision
         with tempfile.TemporaryDirectory() as directory:
             live = Path(directory) / 'NexusCoreCoordination'
             database = provision(live)
-            code = ("import runpy,sys; from pathlib import Path; from unittest.mock import patch; "
-                    "import coordination_hub.paths as paths; server,db,root=sys.argv[1:]; sys.path.insert(0,str(Path(server).parent)); "
-                    "sys.argv=[server,'codex',db,'D:/Programming/NexusCore/.worktrees/codex']; "
-                    "patcher=patch.object(paths,'live_directory',return_value=Path(root)); patcher.start(); "
-                    "runpy.run_path(server,run_name='__main__')")
-            result = subprocess.run([sys.executable, '-B', '-c', code, str(SERVER), str(database), str(live)],
-                                    stdin=subprocess.DEVNULL, capture_output=True, timeout=15, check=False)
+            result = self.run_startup('codex', database, live_root=live)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
 
     def test_live_database_missing_does_not_get_created(self):
@@ -60,25 +59,28 @@ class MCPContractTests(unittest.TestCase):
             live = Path(directory) / 'NexusCoreCoordination'
             database = provision(live)
             database.unlink()
-            code = ("import runpy,sys; from pathlib import Path; from unittest.mock import patch; "
-                    "import coordination_hub.paths as paths; server,db,root=sys.argv[1:]; sys.path.insert(0,str(Path(server).parent)); "
-                    "sys.argv=[server,'codex',db,'D:/Programming/NexusCore/.worktrees/codex']; "
-                    "patcher=patch.object(paths,'live_directory',return_value=Path(root)); patcher.start(); "
-                    "runpy.run_path(server,run_name='__main__')")
-            command = [sys.executable, '-B', '-c', code, str(SERVER), str(database), str(live)]
-            result = subprocess.run(command, stdin=subprocess.DEVNULL,
-                                    capture_output=True, timeout=10, check=False)
+            result = self.run_startup('codex', database, live_root=live)
             self.assertNotEqual(result.returncode, 0)
+            # The failure must come from the missing live database, not from the
+            # injected repository roots or the argument layout.
+            self.assertIn(b'Hub database is missing', result.stderr)
             self.assertFalse(database.exists())
 
     def test_rejects_wrong_worktree_before_database_creation(self):
         with tempfile.TemporaryDirectory() as directory:
-            database = Path(directory) / 'hub.sqlite3'
-            command = [sys.executable, '-B', str(SERVER), 'development', str(database),
-                       'D:/Programming/NexusCore/.worktrees/security']
-            result = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertFalse(database.exists())
+            rejected = Path(directory) / 'rejected' / 'hub.sqlite3'
+            rejected.parent.mkdir()
+            wrong = self.run_startup('development', rejected,
+                                     worktree=self.nexuscore.worktree('security'))
+            # The identity check exits with status 2 before the database is opened.
+            self.assertEqual(wrong.returncode, 2, wrong.stderr.decode(errors='replace'))
+            self.assertFalse(rejected.exists())
+            # Positive control through the same injection: the assigned worktree starts.
+            accepted = Path(directory) / 'accepted' / 'hub.sqlite3'
+            accepted.parent.mkdir()
+            correct = self.run_startup('development', accepted)
+            self.assertEqual(correct.returncode, 0, correct.stderr.decode(errors='replace'))
+            self.assertTrue(accepted.exists())
 
     def test_stdio_task_flow(self):
         self.assertTrue(SERVER.exists(), 'MCP server must exist')
