@@ -33,6 +33,30 @@ business mutations, Telegram/LLM calls, root rollout or WSL/data maintenance.
   configured webhook is not a live Telegram health check. No create, deactivate,
   token, provisioning, AI configuration, cost or alert controls in this increment.
 
+## Loaded-name search
+
+Add a case-insensitive name search over the bots already loaded on the current
+page, mirroring the Organizations directory search. It is a client-side filter:
+no additional API call, no change to `/api/bots`, and no invented total count.
+
+- The control is a `type="search"` input whose accessible label is "Bot name",
+  inside a fieldset whose legend is "Search loaded bots", with a `maxLength` of
+  128. It is disabled while a registration or settings write is in flight, which
+  preserves the existing registration/settings write lock. Filtering can unmount
+  a row that has a running dry-run webhook preview; that component already
+  aborts its request on unmount, so there is no global preview lock and no
+  promise that a hidden preview keeps its result on screen.
+- Matching trims and lowercases the query and filters the loaded page by name,
+  preserving response order; the count reads matching of loaded on this page,
+  never a total.
+- An empty result with rows present is a distinct "No matching bots" state; the
+  existing "No bots registered" and "End of bot list" states stay unchanged when
+  the page itself is empty or exhausted, and pagination stays available under a
+  zero-match query.
+- First page and Next page keep the current query and apply it to the newly
+  loaded page. Refresh, tenant change, section change, sign-out and session
+  expiry reset it. Registration, write and navigation locks are unchanged.
+
 ## Checks and acceptance
 
 1. Establish the existing 18-test/build/lint baseline. Add Node HTTP tests for
