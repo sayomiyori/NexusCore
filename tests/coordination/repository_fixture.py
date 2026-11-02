@@ -59,6 +59,26 @@ def injected_parameters(server, agent, database, worktree, nexus_root, auth_root
         args=injected_command(server, agent, database, worktree, nexus_root, auth_root, live_root))
 
 
+# sys.argv layout for
+# `python -c PROFILE_INJECTION <tool> <nexus_root> <auth_root> <tool arguments...>`.
+PROFILE_INJECTION = '''import runpy, sys
+from pathlib import Path
+tool, nexus_root, auth_root = sys.argv[1:4]
+sys.path.insert(0, str(Path(tool).resolve().parent.parent))
+import coordination_hub.identity as identity
+identity.REPOSITORY_ROOTS['nexuscore'] = Path(nexus_root)
+identity.REPOSITORY_ROOTS['authfortress'] = Path(auth_root)
+sys.argv = [tool, *sys.argv[4:]]
+runpy.run_path(tool, run_name='__main__')
+'''
+
+
+def profile_command(tool, nexus_root, auth_root, *arguments):
+    """Arguments that run the profile tool with disposable repository roots injected."""
+    return ['-B', '-c', PROFILE_INJECTION, str(tool), str(nexus_root), str(auth_root),
+            *map(str, arguments)]
+
+
 class GitFixture:
     """Disposable repository with one registered worktree per agent."""
 

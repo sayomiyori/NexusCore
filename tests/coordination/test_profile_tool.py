@@ -1,8 +1,10 @@
 """Tests for the read-only OpenCode Hub configuration emitter.
 
-Every database used here is created inside a temporary directory. The generated
-profile is consumed through the real stdio server, so the emitted configuration
-is proven usable rather than merely well-formed.
+Every database and every Git repository used here is created inside a temporary
+directory. The repository roots are injected into both the tool and the server
+with test-only runpy wrappers, so the emitted configuration is consumed through
+the real stdio server without reading a real agent worktree or the production
+allowlist.
 """
 import hashlib
 import importlib.util
@@ -17,14 +19,14 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from mcp import ClientSession, StdioServerParameters
+from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / 'coordination_hub'
 TOOL = PACKAGE / 'profile_tool.py'
 STORE = PACKAGE / 'store.py'
-IDENTITY = PACKAGE / 'identity.py'
+FIXTURE = Path(__file__).resolve().parent / 'repository_fixture.py'
 
 
 def load(name, path):
@@ -37,17 +39,28 @@ def load(name, path):
 class ProfileToolTests(unittest.TestCase):
     def setUp(self):
         from coordination_hub.store import Store
+        self.fixtures = load('coordination_profile_fixture', FIXTURE)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.base = Path(temporary.name)
         self.database = self.base / 'hub.sqlite3'
         Store(self.database)
+        self.nexuscore = self.fixtures.GitFixture(self.base / 'repos' / 'nexuscore')
+        self.authfortress = self.fixtures.GitFixture(self.base / 'repos' / 'authfortress',
+                                                     agents=('security',))
+        roots = patch.dict('coordination_hub.identity.REPOSITORY_ROOTS', {
+            'nexuscore': self.nexuscore.root,
+            'authfortress': self.authfortress.root,
+        })
+        roots.start()
+        self.addCleanup(roots.stop)
         self.tool = load('coordination_profile_tool', TOOL)
-        self.identity = load('coordination_profile_identity', IDENTITY)
         self.store_module = load('coordination_profile_store', STORE)
 
     def cli(self, *arguments):
-        return subprocess.run([sys.executable, '-B', str(TOOL), *map(str, arguments)],
+        command = self.fixtures.profile_command(TOOL, self.nexuscore.root,
+                                               self.authfortress.root, *arguments)
+        return subprocess.run([sys.executable, *command],
                               capture_output=True, text=True, timeout=60, check=False)
 
     def test_emits_the_existing_opencode_schema_for_both_roles(self):
@@ -62,7 +75,7 @@ class ProfileToolTests(unittest.TestCase):
                 self.assertTrue(command[1].endswith('server.py'))
                 self.assertEqual(command[2], agent)
                 self.assertEqual(command[3], str(self.database))
-                self.assertEqual(command[4], str(self.identity.worktree_for('nexuscore', agent)))
+                self.assertEqual(command[4], str(self.nexuscore.worktree(agent)))
 
     def test_cli_prints_only_the_profile_on_stdout(self):
         result = self.cli('--agent', 'development', '--database', self.database)
@@ -76,11 +89,13 @@ class ProfileToolTests(unittest.TestCase):
             with self.subTest(agent=agent):
                 emitted = self.cli('--agent', agent, '--database', self.database)
                 self.assertEqual(emitted.returncode, 0, emitted.stderr)
-                command = json.loads(emitted.stdout)['mcp']['servers']['nexus_hub']['command']
-                asyncio.run(self._consume(command))
+                server = json.loads(emitted.stdout)['mcp']['servers']['nexus_hub']
+                asyncio.run(self._consume(server['command']))
 
     async def _consume(self, command):
-        parameters = StdioServerParameters(command=command[0], args=command[1:])
+        parameters = self.fixtures.injected_parameters(
+            command[1], command[2], command[3], command[4],
+            self.nexuscore.root, self.authfortress.root)
         async with stdio_client(parameters) as (read, write), \
                 ClientSession(read, write) as session:
             await session.initialize()
@@ -161,11 +176,23 @@ class ProfileToolTests(unittest.TestCase):
             self.tool.build_config('development', self.database)
         self.assertEqual(str(caught.exception), 'runtime unavailable')
 
-    def test_rejects_an_unavailable_worktree(self):
-        failing = patch.object(self.tool, 'verify_worktree',
-                               side_effect=self.tool.IdentityError('no'))
-        with failing, self.assertRaises(self.tool.ProfileError) as caught:
+    def test_rejects_an_unregistered_worktree_without_blocking_a_registered_one(self):
+        """A missing agent worktree fails through the real identity check."""
+        partial = self.fixtures.GitFixture(self.base / 'repos' / 'partial', agents=('security',))
+        with patch.dict('coordination_hub.identity.REPOSITORY_ROOTS', {'nexuscore': partial.root}):
             self.tool.build_config('security', self.database)
+            with self.assertRaises(self.tool.ProfileError) as caught:
+                self.tool.build_config('development', self.database)
+        self.assertEqual(str(caught.exception), 'agent worktree unavailable')
+
+    def test_rejects_a_worktree_registered_on_the_wrong_branch(self):
+        """The branch check still runs against a real registration, not a stub."""
+        wrong = self.fixtures.GitFixture(self.base / 'repos' / 'wrong-branch', agents=('security',))
+        wrong.git('worktree', 'add', '.worktrees/development', '-b', 'feature/not-an-agent-branch')
+        with patch.dict('coordination_hub.identity.REPOSITORY_ROOTS', {'nexuscore': wrong.root}):
+            self.tool.build_config('security', self.database)
+            with self.assertRaises(self.tool.ProfileError) as caught:
+                self.tool.build_config('development', self.database)
         self.assertEqual(str(caught.exception), 'agent worktree unavailable')
 
     def test_invalid_cli_never_echoes_the_input(self):
