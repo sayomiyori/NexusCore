@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { filterBots } from "../lib/bot-view.ts";
 import type { BotPage } from "../lib/bots.ts";
 import { api, RequestError } from "../lib/client.ts";
 import { kindLabels, needsAttention, stateLabels } from "../lib/event-view.ts";
@@ -51,6 +52,7 @@ export default function Page() {
   }[selection.view];
   const [savingSettings, setSavingSettings] = useState(false);
   const [knowledgeRefresh, setKnowledgeRefresh] = useState(0);
+  const [botQuery, setBotQuery] = useState("");
   const [data, setData] = useState<Overview | BotPage | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
@@ -65,10 +67,16 @@ export default function Page() {
   const codeInput = useRef<HTMLInputElement>(null);
 
   const choose = useCallback(
-    (id: string, view?: Selection["view"], cursor: string | null = null) => {
+    (
+      id: string,
+      view?: Selection["view"],
+      cursor: string | null = null,
+      keepBotSearch = false,
+    ) => {
       query.current?.abort();
       setData(null);
       setError("");
+      if (!keepBotSearch) setBotQuery("");
       setSelection((current) => ({
         tenant: id,
         view: view ?? current.view,
@@ -254,6 +262,10 @@ export default function Page() {
       !data &&
       !error,
   );
+  const botMatches =
+    data && "items" in data && selection.view === "bots"
+      ? filterBots(data.items, botQuery)
+      : [];
   const status = error ? (
     <p role="alert" className="notice error">
       {error}
@@ -789,7 +801,10 @@ export default function Page() {
             <section className="panel bots" aria-label="Tenant bot inventory">
               <div className="panel-heading">
                 <h2>Registered bots</h2>
-                <span>{data.items.length} on this page · Up to 50</span>
+                <span role="status">
+                  {botMatches.length} of {data.items.length} on this page · Up
+                  to 50
+                </span>
               </div>
               {data.tenant.role === "owner" && (
                 <BotRegistration
@@ -799,9 +814,40 @@ export default function Page() {
                   onExpired={expire}
                 />
               )}
-              {data.items.length ? (
+              <fieldset className="event-filters">
+                <legend>Search loaded bots</legend>
+                <label>
+                  Bot name
+                  <input
+                    type="search"
+                    maxLength={128}
+                    value={botQuery}
+                    disabled={busy || savingSettings}
+                    onChange={(event) => setBotQuery(event.target.value)}
+                  />
+                </label>
+              </fieldset>
+              {data.items.length === 0 ? (
+                <div className="empty">
+                  <h3>
+                    {selection.cursor
+                      ? "End of bot list"
+                      : "No bots registered"}
+                  </h3>
+                  <p>
+                    {selection.cursor
+                      ? "There are no more bots after this cursor."
+                      : "This organization has no registered bots."}
+                  </p>
+                </div>
+              ) : botMatches.length === 0 ? (
+                <div className="empty">
+                  <h3>No matching bots</h3>
+                  <p>Search applies only to loaded bots.</p>
+                </div>
+              ) : (
                 <ul className="bot-list">
-                  {data.items.map((bot) => (
+                  {botMatches.map((bot) => (
                     <li key={bot.id}>
                       <div className="bot-identity">
                         <h3>{bot.name}</h3>
@@ -844,26 +890,13 @@ export default function Page() {
                     </li>
                   ))}
                 </ul>
-              ) : (
-                <div className="empty">
-                  <h3>
-                    {selection.cursor
-                      ? "End of bot list"
-                      : "No bots registered"}
-                  </h3>
-                  <p>
-                    {selection.cursor
-                      ? "There are no more bots after this cursor."
-                      : "This organization has no registered bots."}
-                  </p>
-                </div>
               )}
               <nav className="bot-pagination" aria-label="Bot pages">
                 <button
                   type="button"
                   className="refresh"
                   disabled={!selection.cursor || busy || savingSettings}
-                  onClick={() => choose(selected, "bots")}
+                  onClick={() => choose(selected, "bots", null, true)}
                 >
                   First page
                 </button>
@@ -871,7 +904,9 @@ export default function Page() {
                   type="button"
                   className="refresh"
                   disabled={!data.nextCursor || busy || savingSettings}
-                  onClick={() => choose(selected, "bots", data.nextCursor)}
+                  onClick={() =>
+                    choose(selected, "bots", data.nextCursor, true)
+                  }
                 >
                   Next page <span aria-hidden="true">→</span>
                 </button>
