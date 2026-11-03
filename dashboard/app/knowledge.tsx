@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, RequestError } from "../lib/client.ts";
 import type { KnowledgePage } from "../lib/knowledge.ts";
 import { knowledgeStatus } from "../lib/knowledge-status.ts";
+import { filterDocuments } from "../lib/knowledge-view.ts";
 
 export function KnowledgeStatus({
   status,
@@ -33,6 +34,8 @@ export default function Knowledge({
   const [offset, setOffset] = useState(0);
   const [attempt, setAttempt] = useState(0);
   const [page, setPage] = useState<KnowledgePage | null>(null);
+  const [query, setQuery] = useState("");
+  const matches = page ? filterDocuments(page.items, query) : [];
   const [error, setError] = useState("");
   // biome-ignore lint/correctness/useExhaustiveDependencies: An explicit retry repeats the current page read.
   useEffect(() => {
@@ -74,9 +77,29 @@ export default function Knowledge({
         <p role="status">Loading documents…</p>
       ) : (
         <>
-          {page.items.length ? (
+          {page.items.length > 0 && (
+            <>
+              <p className="usage-message" role="status">
+                {matches.length} of {page.items.length} documents on this page.
+                Search applies only to loaded documents.
+              </p>
+              <fieldset className="event-filters">
+                <legend>Search loaded documents</legend>
+                <label>
+                  Document title
+                  <input
+                    type="search"
+                    maxLength={255}
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                  />
+                </label>
+              </fieldset>
+            </>
+          )}
+          {matches.length ? (
             <ul className="bot-list">
-              {page.items.map((item) => (
+              {matches.map((item) => (
                 <li key={item.id}>
                   <div className="bot-identity">
                     <h3>{item.title}</h3>
@@ -92,6 +115,11 @@ export default function Knowledge({
                 </li>
               ))}
             </ul>
+          ) : page.items.length ? (
+            <div className="empty">
+              <h3>No matching documents</h3>
+              <p>Search applies only to loaded documents.</p>
+            </div>
           ) : (
             <div className="empty">
               <h3>{offset ? "End of document list" : "No documents"}</h3>

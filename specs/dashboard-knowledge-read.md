@@ -13,3 +13,23 @@ the tenant or offset. Authentication expiry still ends the session.
 The endpoint remains disabled when AgentHub tenant resources are disabled. No
 uploads, deletion, automatic retries, real providers or existing stand changes are in scope.
 Test issuer denial, malformed source, pagination, isolation and session expiry.
+
+## Loaded-title search
+
+Add a case-insensitive title search over the documents already loaded on the
+current page, mirroring the Organizations and Bots loaded-row searches. It makes
+no API call and never claims a total or cross-page count.
+
+- The control is a `type="search"` input whose accessible label is "Document
+  title", inside a fieldset whose legend is "Search loaded documents", with a
+  `maxLength` of 255 matching the accepted title bound.
+- Matching trims and lowercases the query and filters the loaded page by title,
+  preserving response order. The count reads matching of loaded documents on
+  this page.
+- A zero-match filter with rows present is the distinct "No matching documents"
+  state; the existing "No documents" and "End of document list" states stay
+  unchanged.
+- The search is kept when moving to the first, previous or next offset and
+  applies to the newly loaded page. Tenant change and Refresh already remount
+  the section and reset it. Pagination, authorization, retry, abort and session
+  expiry behavior are unchanged.
