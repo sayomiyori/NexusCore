@@ -4,6 +4,16 @@ import { useEffect, useRef, useState } from "react";
 import type { BotPage } from "../lib/bots.ts";
 import { api, RequestError } from "../lib/client.ts";
 import { stateLabels } from "../lib/event-view.ts";
+import {
+  begin,
+  canGoFirst,
+  fail,
+  initialNavigation,
+  type JobAction,
+  type JobNavigation,
+  resetNavigation,
+  succeed,
+} from "../lib/job-history.ts";
 import type { JobPage } from "../lib/jobs.ts";
 
 export default function Jobs({
@@ -22,7 +32,8 @@ export default function Jobs({
   const active = data.items.filter((bot) => bot.active);
   const [selected, setSelected] = useState(active[0]?.id || "");
   const [page, setPage] = useState<JobPage | null>(null);
-  const [cursor, setCursor] = useState<string | null>(null);
+  const [navigation, setNavigation] =
+    useState<JobNavigation>(initialNavigation);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const query = useRef<AbortController | null>(null);
@@ -32,35 +43,41 @@ export default function Jobs({
     query.current?.abort();
     setSelected(bot);
     setPage(null);
-    setCursor(null);
+    setNavigation(resetNavigation());
     setError("");
     setLoading(false);
   }
-  async function load(next: string | null) {
+  async function load(action: JobAction) {
     query.current?.abort();
     const controller = new AbortController();
     query.current = controller;
     setPage(null);
-    setCursor(next);
     setError("");
     setLoading(true);
+    setNavigation((state) => begin(state, action));
     try {
       const params = new URLSearchParams({
         tenant: data.tenant.id,
         bot: selected,
       });
-      if (next) params.set("cursor", next);
+      const cursor = action.kind === "first" ? null : action.cursor;
+      if (cursor) params.set("cursor", cursor);
       const value = await api<JobPage>(`/api/jobs?${params}`, {
         signal: controller.signal,
       });
-      if (!controller.signal.aborted) setPage(value);
+      if (!controller.signal.aborted) {
+        setPage(value);
+        setNavigation((state) => succeed(state));
+      }
     } catch (reason) {
       if (controller.signal.aborted) return;
       if (reason instanceof RequestError && reason.status === 401) onExpired();
-      else
+      else {
         setError(
           "Job metadata is unavailable for this tenant and bot. Check the active bot or try again.",
         );
+        setNavigation((state) => fail(state));
+      }
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
@@ -73,14 +90,15 @@ export default function Jobs({
       </div>
       <p className="events-window">
         Choose an active bot from this page of up to 50 bots, then load its job
-        snapshots. Reads do not execute, retry or resend jobs.
+        snapshots. Reads do not execute, retry or resend jobs; Retry job page
+        only repeats a failed read.
       </p>
       {active.length ? (
         <form
           className="usage-form"
           onSubmit={(event) => {
             event.preventDefault();
-            void load(null);
+            void load({ kind: "first" });
           }}
         >
           <label>
@@ -206,31 +224,15 @@ export default function Jobs({
             </ol>
           ) : (
             <div className="empty">
-              <h3>{cursor ? "End of job list" : "No recorded jobs"}</h3>
+              <h3>
+                {navigation.current ? "End of job list" : "No recorded jobs"}
+              </h3>
               <p>
                 No job snapshots were returned for this authorized bot and
                 cursor.
               </p>
             </div>
           )}
-          <nav className="bot-pagination" aria-label="AI job pages">
-            <button
-              type="button"
-              className="refresh"
-              disabled={!cursor || loading}
-              onClick={() => void load(null)}
-            >
-              First job page
-            </button>
-            <button
-              type="button"
-              className="refresh"
-              disabled={!page.nextCursor || loading}
-              onClick={() => void load(page.nextCursor)}
-            >
-              Next job page
-            </button>
-          </nav>
         </>
       ) : (
         !loading &&
@@ -241,6 +243,52 @@ export default function Jobs({
           </p>
         )
       )}
+      <nav className="bot-pagination" aria-label="AI job pages">
+        <button
+          type="button"
+          className="refresh"
+          disabled={loading || !canGoFirst(navigation)}
+          onClick={() => void load({ kind: "first" })}
+        >
+          First job page
+        </button>
+        <button
+          type="button"
+          className="refresh"
+          disabled={loading || !navigation.history.length}
+          onClick={() =>
+            void load({
+              kind: "previous",
+              cursor: navigation.history.at(-1) ?? null,
+            })
+          }
+        >
+          Previous job page
+        </button>
+        <button
+          type="button"
+          className="refresh"
+          disabled={loading || !page?.nextCursor}
+          onClick={() =>
+            page?.nextCursor &&
+            void load({ kind: "next", cursor: page.nextCursor })
+          }
+        >
+          Next job page
+        </button>
+        {navigation.failed && navigation.attempted && (
+          <button
+            type="button"
+            className="refresh"
+            disabled={loading}
+            onClick={() =>
+              navigation.attempted && void load(navigation.attempted)
+            }
+          >
+            Retry job page
+          </button>
+        )}
+      </nav>
       <p className="activity-foot">
         Read-only snapshots in UUID order, not live execution or a complete
         history total. Raw envelopes, answers, provider/model and error details

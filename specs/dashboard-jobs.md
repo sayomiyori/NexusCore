@@ -24,10 +24,24 @@ changes, dependencies, migrations, raw job content or business mutations.
   explicit; First job page/Next job page operate separately from First bot page/
   Next bot page. Changing bot or parent scope/page/section/Refresh aborts and
   clears prior job pages; ignore late responses and expire shared session on401.
+- Job page navigation keeps a visited-cursor history and a separate attempted
+  action. The history stores the cursor of each page left behind, capped at 50
+  entries with the oldest dropped, and it is pushed, popped or cleared only after
+  a successful non-aborted read: Next pushes the page being left, Previous pops,
+  First clears. A failed read keeps the last successful position and
+  visited-cursor history but clears the displayed rows, and offers Previous and
+  a Retry job page control that re-issues only that same attempted read. First
+  stays available while the retained successful cursor is nonnull (even when the
+  failed attempt was itself First) or the failed attempted cursor is nonnull.
+  Next is offered only from a successful page's next cursor, and
+  every job navigation control is disabled while a read is in flight. No cookie
+  or API contract changes: the fresh `GET /api/jobs` call and its cursor rules are
+  unchanged.
 - Native controls, full wrapping IDs, UTC labels, fixed state/attempt metadata,
   distinct no request/empty/end/error states and desktop/360 px layout. These
   are stored job snapshots, not live execution, complete history counts or an
-  observability event replay. No polling, retry, reconciliation or delivery UI.
+  observability event replay. No polling, delivery retry, reconciliation or
+  delivery UI; the Retry job page control only repeats a failed read.
 
 ## Acceptance
 
