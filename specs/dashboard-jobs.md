@@ -43,6 +43,25 @@ changes, dependencies, migrations, raw job content or business mutations.
   observability event replay. No polling, delivery retry, reconciliation or
   delivery UI; the Retry job page control only repeats a failed read.
 
+## Loaded-page state filter
+
+Add a client-side state filter over the job snapshots already loaded on the
+current page. It makes no API call, does not change `GET /api/jobs` or its cursor
+rules, and never claims a tenant-wide or cross-page count.
+
+- The control is a "Job state" select inside a fieldset whose legend is
+  "Filter loaded job snapshots", with options for all states plus the five known
+  stored states.
+- Filtering preserves response order, leaves the loaded page and its next cursor
+  unchanged, and does not alter First/Previous/Next/Retry, their abort behavior
+  or their history transitions. The count reads matching of loaded rows on this
+  page only.
+- A zero-match filter with rows present is the distinct "No jobs in this state"
+  state; the existing no-request, empty and end states stay unchanged.
+- The filter is kept when moving between job pages and resets when the bot
+  changes; parent scope, tenant, section and Refresh changes already remount the
+  section and therefore reset it too.
+
 ## Acceptance
 
 1. Existing36tests plus HTTP regressions prove scope/query guards, owner/member

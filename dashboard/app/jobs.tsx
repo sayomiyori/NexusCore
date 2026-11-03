@@ -14,6 +14,7 @@ import {
   resetNavigation,
   succeed,
 } from "../lib/job-history.ts";
+import { filterJobs, type JobStateFilter, jobStates } from "../lib/job-view.ts";
 import type { JobPage } from "../lib/jobs.ts";
 
 export default function Jobs({
@@ -32,6 +33,8 @@ export default function Jobs({
   const active = data.items.filter((bot) => bot.active);
   const [selected, setSelected] = useState(active[0]?.id || "");
   const [page, setPage] = useState<JobPage | null>(null);
+  const [state, setState] = useState<JobStateFilter>("all");
+  const items = page ? filterJobs(page.items, state) : [];
   const [navigation, setNavigation] =
     useState<JobNavigation>(initialNavigation);
   const [error, setError] = useState("");
@@ -43,6 +46,7 @@ export default function Jobs({
     query.current?.abort();
     setSelected(bot);
     setPage(null);
+    setState("all");
     setNavigation(resetNavigation());
     setError("");
     setLoading(false);
@@ -166,12 +170,33 @@ export default function Jobs({
       {page ? (
         <>
           <p className="usage-message" role="status">
-            {page.items.length} job snapshots on this page. Counts refer only to
-            this page.
+            {items.length} of {page.items.length} job snapshots on this page.
+            Filter and counts apply only to loaded rows.
           </p>
-          {page.items.length ? (
+          {page.items.length > 0 && (
+            <fieldset className="event-filters">
+              <legend>Filter loaded job snapshots</legend>
+              <label>
+                Job state
+                <select
+                  value={state}
+                  onChange={(event) =>
+                    setState(event.target.value as JobStateFilter)
+                  }
+                >
+                  <option value="all">All states</option>
+                  {jobStates.map((value) => (
+                    <option key={value} value={value}>
+                      {stateLabels[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </fieldset>
+          )}
+          {items.length ? (
             <ol className="event-list job-list">
-              {page.items.map((job) => (
+              {items.map((job) => (
                 <li key={job.id}>
                   <div className="event-detail-heading">
                     <h3>Job snapshot</h3>
@@ -222,6 +247,11 @@ export default function Jobs({
                 </li>
               ))}
             </ol>
+          ) : page.items.length ? (
+            <div className="empty">
+              <h3>No jobs in this state</h3>
+              <p>Change the state filter to see other loaded job snapshots.</p>
+            </div>
           ) : (
             <div className="empty">
               <h3>
