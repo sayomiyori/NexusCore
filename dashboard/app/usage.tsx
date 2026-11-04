@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { BotPage } from "../lib/bots.ts";
 import { api, RequestError } from "../lib/client.ts";
 import type { Usage as UsageData } from "../lib/usage.ts";
+import { usageIntervalError } from "../lib/usage-view.ts";
 
 export default function Usage({
   data,
@@ -30,6 +31,7 @@ export default function Usage({
   const [result, setResult] = useState<UsageData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const intervalError = usageIntervalError(values.start, values.end);
   const query = useRef<AbortController | null>(null);
   useEffect(() => () => query.current?.abort(), []);
 
@@ -43,6 +45,7 @@ export default function Usage({
 
   async function load(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!values.bot || usageIntervalError(values.start, values.end)) return;
     query.current?.abort();
     const controller = new AbortController();
     query.current = controller;
@@ -117,7 +120,7 @@ export default function Usage({
           <button
             type="submit"
             className="refresh"
-            disabled={loading || !values.bot}
+            disabled={loading || !values.bot || Boolean(intervalError)}
           >
             {loading ? "Loading usage…" : "Load usage"}
           </button>
@@ -133,6 +136,11 @@ export default function Usage({
             organization.
           </p>
         </div>
+      )}
+      {active.length > 0 && intervalError && (
+        <p role="alert" className="notice error">
+          {intervalError}
+        </p>
       )}
       <nav className="bot-pagination" aria-label="Usage bot pages">
         <button
