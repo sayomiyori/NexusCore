@@ -37,6 +37,18 @@ all deployments, provider settings, WSL, foreign work and independent services.
   recorded estimates, not invoices, real-time bills or lifetime totals. No
   provider price assumptions, job replay, bot editing or LLM activation.
 
+## Client interval pre-check
+
+Before an explicit read, the Usage form applies the same UTC interval bounds as
+the BFF: canonical supported dates, start before end and at most 31 days. An
+invalid interval is reported inline and Load usage is disabled, so no request is
+sent for invalid input.
+
+This is a UX pre-check only. The BFF and AgentHub remain authoritative, and an
+unexpected upstream denial keeps the existing distinct error path. Changing
+bot/date inputs still aborts and clears the prior result/error, stale responses
+remain ignored and 401 still expires the shared session.
+
 ## Acceptance
 
 1. Existing29tests plus HTTP BFF regressions cover exact paths/headers/UTC bounds,
