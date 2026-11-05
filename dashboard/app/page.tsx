@@ -1,6 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type BotAction,
+  type BotNavigation,
+  begin,
+  canGoFirst,
+  canGoPrevious,
+  canRetry,
+  cursorFor,
+  fail,
+  initialNavigation,
+  previousCursor,
+  resetNavigation,
+  succeed,
+} from "../lib/bot-history.ts";
 import { filterBots } from "../lib/bot-view.ts";
 import type { BotPage } from "../lib/bots.ts";
 import { api, RequestError } from "../lib/client.ts";
@@ -53,6 +67,8 @@ export default function Page() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [knowledgeRefresh, setKnowledgeRefresh] = useState(0);
   const [botQuery, setBotQuery] = useState("");
+  const [botPages, setBotPages] = useState<BotNavigation>(initialNavigation);
+  const [botLoading, setBotLoading] = useState(false);
   const [data, setData] = useState<Overview | BotPage | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
@@ -65,18 +81,17 @@ export default function Page() {
   const query = useRef<AbortController | null>(null);
   const membershipQuery = useRef<AbortController | null>(null);
   const codeInput = useRef<HTMLInputElement>(null);
+  const botPageRequest = useRef(false);
 
   const choose = useCallback(
-    (
-      id: string,
-      view?: Selection["view"],
-      cursor: string | null = null,
-      keepBotSearch = false,
-    ) => {
+    (id: string, view?: Selection["view"], cursor: string | null = null) => {
       query.current?.abort();
+      botPageRequest.current = false;
       setData(null);
       setError("");
-      if (!keepBotSearch) setBotQuery("");
+      setBotLoading(false);
+      setBotPages(resetNavigation());
+      setBotQuery("");
       setSelection((current) => ({
         tenant: id,
         view: view ?? current.view,
@@ -85,6 +100,20 @@ export default function Page() {
     },
     [],
   );
+
+  const pageBots = useCallback((action: BotAction) => {
+    query.current?.abort();
+    botPageRequest.current = true;
+    setData(null);
+    setError("");
+    setBotLoading(true);
+    setBotPages((state) => begin(state, action));
+    setSelection((current) => ({
+      tenant: current.tenant,
+      view: "bots",
+      cursor: cursorFor(action),
+    }));
+  }, []);
 
   const expire = useCallback(() => {
     membershipQuery.current?.abort();
@@ -156,12 +185,21 @@ export default function Page() {
       signal: controller.signal,
     })
       .then((result) => {
-        if (!controller.signal.aborted) setData(result);
+        if (controller.signal.aborted) return;
+        setData(result);
+        setBotLoading(false);
+        if (botPageRequest.current) setBotPages((state) => succeed(state));
       })
       .catch((reason) => {
         if (controller.signal.aborted) return;
+        setBotLoading(false);
         if (reason instanceof RequestError && reason.status === 401) {
           expire();
+        } else if (botPageRequest.current) {
+          setBotPages((state) => fail(state));
+          setError(
+            "This bot page could not be loaded. Retry the page, step back, or return to the first page.",
+          );
         } else setError("Unable to load this tenant. Refresh to try again.");
       });
     return () => controller.abort();
@@ -260,12 +298,12 @@ export default function Page() {
     selected &&
       !["knowledge", "tenants"].includes(selection.view) &&
       !data &&
-      !error,
+      !error &&
+      !(selection.view === "bots" && botLoading),
   );
-  const botMatches =
-    data && "items" in data && selection.view === "bots"
-      ? filterBots(data.items, botQuery)
-      : [];
+  const botPage =
+    data && "items" in data && selection.view === "bots" ? data : null;
+  const botMatches = botPage ? filterBots(botPage.items, botQuery) : [];
   const status = error ? (
     <p role="alert" className="notice error">
       {error}
@@ -797,126 +835,190 @@ export default function Page() {
               onExpired={expire}
             />
           )}
-          {data && "items" in data && selection.view === "bots" && (
-            <section className="panel bots" aria-label="Tenant bot inventory">
-              <div className="panel-heading">
-                <h2>Registered bots</h2>
-                <span role="status">
-                  {botMatches.length} of {data.items.length} on this page · Up
-                  to 50
-                </span>
-              </div>
-              {data.tenant.role === "owner" && (
-                <BotRegistration
-                  tenant={selected}
-                  onSaving={setSavingSettings}
-                  onCreated={() => choose(selected, "bots")}
-                  onExpired={expire}
-                />
-              )}
-              <fieldset className="event-filters">
-                <legend>Search loaded bots</legend>
-                <label>
-                  Bot name
-                  <input
-                    type="search"
-                    maxLength={128}
-                    value={botQuery}
-                    disabled={busy || savingSettings}
-                    onChange={(event) => setBotQuery(event.target.value)}
+          {selection.view === "bots" &&
+            (botPage || botPages.failed || botLoading) && (
+              <section className="panel bots" aria-label="Tenant bot inventory">
+                <div className="panel-heading">
+                  <h2>Registered bots</h2>
+                  <span role="status">
+                    {botPage
+                      ? `${botMatches.length} of ${botPage.items.length} on this page · Up to 50`
+                      : "Page not loaded"}
+                  </span>
+                </div>
+                {botPage?.tenant.role === "owner" && (
+                  <BotRegistration
+                    tenant={selected}
+                    onSaving={setSavingSettings}
+                    onCreated={() => choose(selected, "bots")}
+                    onExpired={expire}
                   />
-                </label>
-              </fieldset>
-              {data.items.length === 0 ? (
-                <div className="empty">
-                  <h3>
-                    {selection.cursor
-                      ? "End of bot list"
-                      : "No bots registered"}
-                  </h3>
-                  <p>
-                    {selection.cursor
-                      ? "There are no more bots after this cursor."
-                      : "This organization has no registered bots."}
-                  </p>
-                </div>
-              ) : botMatches.length === 0 ? (
-                <div className="empty">
-                  <h3>No matching bots</h3>
-                  <p>Search applies only to loaded bots.</p>
-                </div>
-              ) : (
-                <ul className="bot-list">
-                  {botMatches.map((bot) => (
-                    <li key={bot.id}>
-                      <div className="bot-identity">
-                        <h3>{bot.name}</h3>
-                        <code>{bot.id}</code>
-                        <p>
-                          Added{" "}
-                          <time dateTime={bot.created}>
-                            {new Date(bot.created).toLocaleDateString("en-GB", {
-                              timeZone: "UTC",
-                            })}
-                          </time>
-                        </p>
-                      </div>
-                      <div className="bot-status">
-                        <span className="bot-field">Configuration</span>
-                        <strong>{bot.active ? "Active" : "Inactive"}</strong>
-                        <span className="bot-field">Stored webhook status</span>
-                        <span
-                          className={`state${["failed", "unknown"].includes(bot.webhook) ? " attention" : ""}`}
-                        >
-                          {stateLabels[bot.webhook]}
-                        </span>
-                        <p>
-                          Updated{" "}
-                          <time dateTime={bot.updated}>
-                            {new Date(bot.updated).toLocaleDateString("en-GB", {
-                              timeZone: "UTC",
-                            })}
-                          </time>
-                        </p>
-                        {data.tenant.role === "owner" && bot.active && (
-                          <BotWebhookPreview
-                            tenant={selected}
-                            bot={bot.id}
-                            disabled={busy || savingSettings}
-                            onExpired={expire}
-                          />
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <nav className="bot-pagination" aria-label="Bot pages">
-                <button
-                  type="button"
-                  className="refresh"
-                  disabled={!selection.cursor || busy || savingSettings}
-                  onClick={() => choose(selected, "bots", null, true)}
-                >
-                  First page
-                </button>
-                <button
-                  type="button"
-                  className="refresh"
-                  disabled={!data.nextCursor || busy || savingSettings}
-                  onClick={() =>
-                    choose(selected, "bots", data.nextCursor, true)
-                  }
-                >
-                  Next page <span aria-hidden="true">→</span>
-                </button>
-              </nav>
-              <p className="activity-foot">
-                Configuration records from WebHook Manager. No live Telegram
-                health check is performed. Refresh returns to the first page.
-              </p>
-            </section>
-          )}
+                )}
+                <fieldset className="event-filters">
+                  <legend>Search loaded bots</legend>
+                  <label>
+                    Bot name
+                    <input
+                      type="search"
+                      maxLength={128}
+                      value={botQuery}
+                      disabled={busy || savingSettings}
+                      onChange={(event) => setBotQuery(event.target.value)}
+                    />
+                  </label>
+                </fieldset>
+                {botLoading ? (
+                  <div className="empty" aria-live="polite">
+                    <div className="loader" aria-hidden="true" />
+                    <p role="status">Reading the authorized bot inventory…</p>
+                  </div>
+                ) : !botPage ? (
+                  <div className="empty">
+                    <h3>Bot page unavailable</h3>
+                    <p>
+                      This page could not be loaded. Retry the page, step back,
+                      or return to the first page.
+                    </p>
+                  </div>
+                ) : botPage.items.length === 0 ? (
+                  <div className="empty">
+                    <h3>
+                      {botPages.current
+                        ? "End of bot list"
+                        : "No bots registered"}
+                    </h3>
+                    <p>
+                      {botPages.current
+                        ? "There are no more bots after this cursor."
+                        : "This organization has no registered bots."}
+                    </p>
+                  </div>
+                ) : botMatches.length === 0 ? (
+                  <div className="empty">
+                    <h3>No matching bots</h3>
+                    <p>Search applies only to loaded bots.</p>
+                  </div>
+                ) : (
+                  <ul className="bot-list">
+                    {botMatches.map((bot) => (
+                      <li key={bot.id}>
+                        <div className="bot-identity">
+                          <h3>{bot.name}</h3>
+                          <code>{bot.id}</code>
+                          <p>
+                            Added{" "}
+                            <time dateTime={bot.created}>
+                              {new Date(bot.created).toLocaleDateString(
+                                "en-GB",
+                                {
+                                  timeZone: "UTC",
+                                },
+                              )}
+                            </time>
+                          </p>
+                        </div>
+                        <div className="bot-status">
+                          <span className="bot-field">Configuration</span>
+                          <strong>{bot.active ? "Active" : "Inactive"}</strong>
+                          <span className="bot-field">
+                            Stored webhook status
+                          </span>
+                          <span
+                            className={`state${["failed", "unknown"].includes(bot.webhook) ? " attention" : ""}`}
+                          >
+                            {stateLabels[bot.webhook]}
+                          </span>
+                          <p>
+                            Updated{" "}
+                            <time dateTime={bot.updated}>
+                              {new Date(bot.updated).toLocaleDateString(
+                                "en-GB",
+                                {
+                                  timeZone: "UTC",
+                                },
+                              )}
+                            </time>
+                          </p>
+                          {botPage.tenant.role === "owner" && bot.active && (
+                            <BotWebhookPreview
+                              tenant={selected}
+                              bot={bot.id}
+                              disabled={busy || savingSettings}
+                              onExpired={expire}
+                            />
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <nav className="bot-pagination" aria-label="Bot pages">
+                  <button
+                    type="button"
+                    className="refresh"
+                    disabled={
+                      botLoading ||
+                      !canGoFirst(botPages) ||
+                      busy ||
+                      savingSettings
+                    }
+                    onClick={() => pageBots({ kind: "first" })}
+                  >
+                    First page
+                  </button>
+                  <button
+                    type="button"
+                    className="refresh"
+                    disabled={
+                      botLoading ||
+                      !canGoPrevious(botPages) ||
+                      busy ||
+                      savingSettings
+                    }
+                    onClick={() =>
+                      pageBots({
+                        kind: "previous",
+                        cursor: previousCursor(botPages),
+                      })
+                    }
+                  >
+                    <span aria-hidden="true">←</span> Previous page
+                  </button>
+                  <button
+                    type="button"
+                    className="refresh"
+                    disabled={
+                      botLoading ||
+                      !botPage?.nextCursor ||
+                      busy ||
+                      savingSettings
+                    }
+                    onClick={() =>
+                      botPage?.nextCursor &&
+                      pageBots({ kind: "next", cursor: botPage.nextCursor })
+                    }
+                  >
+                    Next page <span aria-hidden="true">→</span>
+                  </button>
+                  {canRetry(botPages) && botPages.attempted && (
+                    <button
+                      type="button"
+                      className="refresh"
+                      disabled={botLoading || busy || savingSettings}
+                      onClick={() =>
+                        botPages.attempted && pageBots(botPages.attempted)
+                      }
+                    >
+                      Retry page
+                    </button>
+                  )}
+                </nav>
+                <p className="activity-foot">
+                  Configuration records from WebHook Manager. No live Telegram
+                  health check is performed. Refresh returns to the first page.
+                </p>
+              </section>
+            )}
         </div>
         <footer className="footer">
           NexusCore <span>Tenant-isolated observability</span>
