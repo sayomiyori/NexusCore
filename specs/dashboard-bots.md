@@ -27,8 +27,9 @@ business mutations, Telegram/LLM calls, root rollout or WSL/data maintenance.
   buttons. Both real views share tenant selection, Refresh and logout. No new
   routing/auth framework or client data cache is required. Refresh and tenant/
   section changes reset to the first page, clear old data and abort stale reads.
-  Forward cursor navigation and First page provide the complete bounded list;
-  there is no invented total count or automatic polling.
+  First/Previous/Next page navigation over the existing forward cursor provides
+  the complete bounded list; there is no invented total count or automatic
+  polling.
 - Clearly label active/inactive configuration and stored webhook status. A
   configured webhook is not a live Telegram health check. No create, deactivate,
   token, provisioning, AI configuration, cost or alert controls in this increment.
@@ -54,8 +55,38 @@ no additional API call, no change to `/api/bots`, and no invented total count.
   the page itself is empty or exhausted, and pagination stays available under a
   zero-match query.
 - First page and Next page keep the current query and apply it to the newly
-  loaded page. Refresh, tenant change, section change, sign-out and session
-  expiry reset it. Registration, write and navigation locks are unchanged.
+  loaded page. Previous page keeps it too. Refresh, tenant change, section
+  change, sign-out and session expiry reset it. Registration, write and
+  navigation locks are unchanged.
+
+## Bot page navigation
+
+Visited bot pages become walkable backwards without changing the API. This
+reuses the accepted Jobs navigation contract for the page cursor that the Bots
+section already owns, adds no route, dependency or server code, and makes no
+additional request: each First/Previous/Next action issues exactly one fresh
+authorized `GET /api/bots`, whose cursor rules are unchanged.
+
+- Navigation keeps a visited-cursor history and a separate attempted action.
+  The history stores the cursor of each page left behind, capped at 50 entries
+  with the oldest dropped, and it is pushed, popped or cleared only after a
+  successful non-aborted read: Next pushes the page being left, Previous pops,
+  First clears.
+- A failed read keeps the last successful cursor and visited-cursor history but
+  clears the displayed rows, and offers Previous from that history plus a Retry
+  page control that re-issues only the same attempted read. First stays
+  available while the retained successful cursor is nonnull (even when the
+  failed attempt was itself First) or the failed attempted cursor is nonnull.
+  Next is offered only from a successful page's next cursor.
+- Every bot navigation and Retry control is disabled while a read is in flight
+  and while a registration or settings write is in flight, preserving the
+  existing write lock. Page and section changes, Refresh, registration
+  completion, sign-out and session expiry discard the history and abort stale
+  reads, so no cursor from another tenant or section can be replayed.
+- The empty-page states stay distinct: the first page keeps "No bots
+  registered", a later page keeps "End of bot list", and a zero-match search
+  keeps "No matching bots". Retrying or walking back does not invent a total
+  count and does not change the loaded-only search semantics.
 
 ## Checks and acceptance
 
