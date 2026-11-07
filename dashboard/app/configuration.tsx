@@ -8,14 +8,18 @@ import { api, RequestError } from "../lib/client.ts";
 export default function Configuration({
   data,
   canFirst,
+  canPrevious,
   onFirst,
+  onPrevious,
   onNext,
   onExpired,
   onSaving,
 }: {
   data: BotPage;
   canFirst: boolean;
+  canPrevious: boolean;
   onFirst: () => void;
+  onPrevious: () => void;
   onNext: () => void;
   onExpired: () => void;
   onSaving: (value: boolean) => void;
@@ -205,6 +209,14 @@ export default function Configuration({
             onClick={onFirst}
           >
             First bot page
+          </button>
+          <button
+            type="button"
+            className="refresh"
+            disabled={!canPrevious || saving}
+            onClick={onPrevious}
+          >
+            <span aria-hidden="true">←</span> Previous bot page
           </button>
           <button
             type="button"

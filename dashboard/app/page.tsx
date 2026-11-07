@@ -30,6 +30,7 @@ import Organizations from "./organizations.tsx";
 import Usage from "./usage.tsx";
 
 type TenantPage = { items: Tenant[]; hasMore: boolean; offset: number };
+type BotView = "bots" | "usage" | "configuration";
 type Selection = {
   tenant: string;
   view:
@@ -101,7 +102,7 @@ export default function Page() {
     [],
   );
 
-  const pageBots = useCallback((action: BotAction) => {
+  const pageBots = useCallback((action: BotAction, view: BotView = "bots") => {
     query.current?.abort();
     botPageRequest.current = true;
     setData(null);
@@ -110,7 +111,7 @@ export default function Page() {
     setBotPages((state) => begin(state, action));
     setSelection((current) => ({
       tenant: current.tenant,
-      view: "bots",
+      view,
       cursor: cursorFor(action),
     }));
   }, []);
@@ -198,7 +199,9 @@ export default function Page() {
         } else if (botPageRequest.current) {
           setBotPages((state) => fail(state));
           setError(
-            "This bot page could not be loaded. Retry the page, step back, or return to the first page.",
+            selection.view === "bots"
+              ? "This bot page could not be loaded. Retry the page, step back, or return to the first page."
+              : "This bot page could not be loaded. Refresh to try again.",
           );
         } else setError("Unable to load this tenant. Refresh to try again.");
       });
@@ -810,9 +813,19 @@ export default function Page() {
           {data && "items" in data && selection.view === "usage" && (
             <Usage
               data={data}
-              canFirst={Boolean(selection.cursor)}
-              onFirst={() => choose(selected, "usage")}
-              onNext={() => choose(selected, "usage", data.nextCursor)}
+              canFirst={canGoFirst(botPages)}
+              canPrevious={canGoPrevious(botPages)}
+              onFirst={() => pageBots({ kind: "first" }, "usage")}
+              onPrevious={() =>
+                pageBots(
+                  { kind: "previous", cursor: previousCursor(botPages) },
+                  "usage",
+                )
+              }
+              onNext={() =>
+                data.nextCursor &&
+                pageBots({ kind: "next", cursor: data.nextCursor }, "usage")
+              }
               onExpired={expire}
             />
           )}
@@ -820,9 +833,22 @@ export default function Page() {
             <Configuration
               onSaving={setSavingSettings}
               data={data}
-              canFirst={Boolean(selection.cursor)}
-              onFirst={() => choose(selected, "configuration")}
-              onNext={() => choose(selected, "configuration", data.nextCursor)}
+              canFirst={canGoFirst(botPages)}
+              canPrevious={canGoPrevious(botPages)}
+              onFirst={() => pageBots({ kind: "first" }, "configuration")}
+              onPrevious={() =>
+                pageBots(
+                  { kind: "previous", cursor: previousCursor(botPages) },
+                  "configuration",
+                )
+              }
+              onNext={() =>
+                data.nextCursor &&
+                pageBots(
+                  { kind: "next", cursor: data.nextCursor },
+                  "configuration",
+                )
+              }
               onExpired={expire}
             />
           )}

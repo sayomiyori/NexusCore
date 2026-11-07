@@ -25,13 +25,16 @@ all deployments, provider settings, WSL, foreign work and independent services.
   floating point. Reject malformed/nonfinite/negative/excess precision/oversize
   values. No provider/model/raw usage/message/answer/credential fields.
 - Add native Usage navigation. Reuse the existing paged safe Bots DTO for an
-  active-bot selector, Next page/First page and names. Explain active-only and
+  active-bot selector, First/Previous/Next pages and names. Previous re-reads a
+  client-side visited cursor from the shared bot-page history; only a successful
+  non-aborted page read moves the navigation position. Explain active-only and
   50-record page limits, including pages with no active bots. Do not scan pages
   automatically or invent a tenant-wide total. Four mobile tabs wrap safely.
 - Native UTC date inputs default to the current UTC day [today,tomorrow).
   Load usage is explicit. Changing bot/date inputs aborts and clears prior
-  result/error; parent Refresh/tenant/section/page changes unmount and reset the
-  form. Ignore stale responses and expire shared session on401.
+  result/error; parent Refresh/tenant/section/page changes unmount, reset the
+  form and clear bot-page history. Ignore stale responses and expire shared
+  session on401.
 - Show loading, no result, successful zero usage, malformed/unavailable/denied
   states distinctly. Never substitute zeros on failure. Label estimates as
   recorded estimates, not invoices, real-time bills or lifetime totals. No
