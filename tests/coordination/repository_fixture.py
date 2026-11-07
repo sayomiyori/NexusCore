@@ -87,7 +87,7 @@ class GitFixture:
         self.root.mkdir(parents=True)
         self.git('init', '-q', '-b', 'main')
         (self.root / 'app').mkdir()
-        (self.root / 'app/main.py').write_text('print("synthetic")\n', encoding='utf-8')
+        (self.root / 'app/main.py').write_bytes(b'print("synthetic")\n')
         self.git('add', '-A')
         self.git('commit', '-q', '-m', 'synthetic baseline')
         self.revision = self.git('rev-parse', 'HEAD').strip()
