@@ -10,6 +10,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -48,6 +49,9 @@ class ProfileToolTests(unittest.TestCase):
         self.nexuscore = self.fixtures.GitFixture(self.base / 'repos' / 'nexuscore')
         self.authfortress = self.fixtures.GitFixture(self.base / 'repos' / 'authfortress',
                                                      agents=('security',))
+        # The emitted server is pinned to the selected agent worktree, so each
+        # disposable worktree needs its own copy of the Hub package.
+        self.install_server(self.nexuscore, 'security', 'development')
         roots = patch.dict('coordination_hub.identity.REPOSITORY_ROOTS', {
             'nexuscore': self.nexuscore.root,
             'authfortress': self.authfortress.root,
@@ -57,6 +61,12 @@ class ProfileToolTests(unittest.TestCase):
         self.tool = load('coordination_profile_tool', TOOL)
         self.store_module = load('coordination_profile_store', STORE)
 
+    def install_server(self, repository, *agents):
+        """Give disposable worktrees the package the emitted profile runs."""
+        for agent in agents:
+            shutil.copytree(PACKAGE, repository.worktree(agent) / 'coordination_hub',
+                            ignore=shutil.ignore_patterns('__pycache__', 'profiles'))
+
     def cli(self, *arguments):
         command = self.fixtures.profile_command(TOOL, self.nexuscore.root,
                                                self.authfortress.root, *arguments)
@@ -64,6 +74,7 @@ class ProfileToolTests(unittest.TestCase):
                               capture_output=True, text=True, timeout=60, check=False)
 
     def test_emits_the_existing_opencode_schema_for_both_roles(self):
+        emitted_servers = set()
         for agent in ('security', 'development'):
             with self.subTest(agent=agent):
                 server = self.tool.build_config(agent, self.database)['mcp']['servers']['nexus_hub']
@@ -72,10 +83,26 @@ class ProfileToolTests(unittest.TestCase):
                 command = server['command']
                 self.assertEqual(len(command), 5)
                 self.assertEqual(command[0], sys.executable)
-                self.assertTrue(command[1].endswith('server.py'))
+                expected_server = self.nexuscore.worktree(agent) / 'coordination_hub' / 'server.py'
+                self.assertEqual(command[1], str(expected_server))
+                self.assertTrue(expected_server.is_file())
                 self.assertEqual(command[2], agent)
                 self.assertEqual(command[3], str(self.database))
                 self.assertEqual(command[4], str(self.nexuscore.worktree(agent)))
+                emitted_servers.add(command[1])
+        self.assertEqual(len(emitted_servers), 2)
+
+    def test_emitted_server_is_pinned_to_the_role_worktree(self):
+        """A profile must not run the Hub code of the emitter's checkout."""
+        emitter = Path(self.tool.__file__).resolve().parent
+        for agent in ('security', 'development'):
+            with self.subTest(agent=agent):
+                command = self.tool.build_config(agent, self.database)[
+                    'mcp']['servers']['nexus_hub']['command']
+                emitted = Path(command[1]).resolve()
+                self.assertEqual(emitted.parent.parent, self.nexuscore.worktree(agent).resolve())
+                self.assertNotEqual(emitted.parent, emitter)
+                self.assertNotEqual(emitted, (emitter / 'server.py').resolve())
 
     def test_cli_prints_only_the_profile_on_stdout(self):
         result = self.cli('--agent', 'development', '--database', self.database)
@@ -171,14 +198,44 @@ class ProfileToolTests(unittest.TestCase):
         self.assertEqual(str(caught.exception), 'database schema mismatch')
 
     def test_rejects_a_missing_runtime_path(self):
-        missing = patch.object(self.tool, 'SERVER_PATH', self.base / 'absent-server.py')
-        with missing, self.assertRaises(self.tool.ProfileError) as caught:
+        """The server must exist in the worktree the emitted profile will run."""
+        bare = self.fixtures.GitFixture(self.base / 'repos' / 'bare', agents=('development',))
+        with patch.dict('coordination_hub.identity.REPOSITORY_ROOTS', {'nexuscore': bare.root}), \
+                self.assertRaises(self.tool.ProfileError) as caught:
+            self.tool.build_config('development', self.database)
+        self.assertEqual(str(caught.exception), 'runtime unavailable')
+
+    def test_rejects_a_nonregular_target_server(self):
+        """A directory or other non-regular target entry is not a server."""
+        bare = self.fixtures.GitFixture(self.base / 'repos' / 'nonregular',
+                                        agents=('development',))
+        package = bare.worktree('development') / 'coordination_hub'
+        package.mkdir()
+        (package / 'server.py').mkdir()
+        with patch.dict('coordination_hub.identity.REPOSITORY_ROOTS', {'nexuscore': bare.root}), \
+                self.assertRaises(self.tool.ProfileError) as caught:
+            self.tool.build_config('development', self.database)
+        self.assertEqual(str(caught.exception), 'runtime unavailable')
+
+    def test_rejects_a_linked_target_server(self):
+        """A link or reparse point at the target server fails closed."""
+        bare = self.fixtures.GitFixture(self.base / 'repos' / 'linked-server',
+                                        agents=('development',))
+        package = bare.worktree('development') / 'coordination_hub'
+        package.mkdir()
+        try:
+            os.symlink(PACKAGE / 'server.py', package / 'server.py')
+        except (OSError, NotImplementedError):
+            self.skipTest('Symbolic links are not available for this account')
+        with patch.dict('coordination_hub.identity.REPOSITORY_ROOTS', {'nexuscore': bare.root}), \
+                self.assertRaises(self.tool.ProfileError) as caught:
             self.tool.build_config('development', self.database)
         self.assertEqual(str(caught.exception), 'runtime unavailable')
 
     def test_rejects_an_unregistered_worktree_without_blocking_a_registered_one(self):
         """A missing agent worktree fails through the real identity check."""
         partial = self.fixtures.GitFixture(self.base / 'repos' / 'partial', agents=('security',))
+        self.install_server(partial, 'security')
         with patch.dict('coordination_hub.identity.REPOSITORY_ROOTS', {'nexuscore': partial.root}):
             self.tool.build_config('security', self.database)
             with self.assertRaises(self.tool.ProfileError) as caught:
@@ -189,6 +246,7 @@ class ProfileToolTests(unittest.TestCase):
         """The branch check still runs against a real registration, not a stub."""
         wrong = self.fixtures.GitFixture(self.base / 'repos' / 'wrong-branch', agents=('security',))
         wrong.git('worktree', 'add', '.worktrees/development', '-b', 'feature/not-an-agent-branch')
+        self.install_server(wrong, 'security')
         with patch.dict('coordination_hub.identity.REPOSITORY_ROOTS', {'nexuscore': wrong.root}):
             self.tool.build_config('security', self.database)
             with self.assertRaises(self.tool.ProfileError) as caught:

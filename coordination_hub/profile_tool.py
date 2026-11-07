@@ -2,9 +2,11 @@
 
 The tool is read-only: it validates the agent, the agent's registered worktree
 and the Hub database, then prints the ``mcp.servers.nexus_hub`` entry to stdout.
-It never writes a configuration file, never edits a global profile and never
-opens the database read-write. Diagnostics are static so a failure cannot echo
-user arguments, environment values or database content.
+The emitted server entry point comes from the validated agent worktree, not from
+this tool's own checkout, so a profile cannot execute another worktree's Hub
+code. The tool never writes a configuration file, never edits a global profile
+and never opens the database read-write. Diagnostics are static so a failure
+cannot echo user arguments, environment values or database content.
 """
 import argparse
 import json
@@ -30,7 +32,6 @@ from coordination_hub.store import Conflict, validate_schema
 # Roles that use the Hub through OpenCode. The reviewer role is intentionally
 # excluded: it reviews submissions and does not reserve work of its own.
 ROLES = ('security', 'development')
-SERVER_PATH = Path(__file__).resolve().parent / 'server.py'
 SYNTHETIC_DATABASE = Path('D:/Programming/NexusCore-coordination-connectivity-test/hub.sqlite3')
 
 MESSAGES = {
@@ -97,12 +98,25 @@ def verify_database(database):
     return database
 
 
-def runtime_paths():
-    """Return the interpreter and server entry point, both required to exist."""
+def runtime_paths(worktree):
+    """Return the interpreter and the validated worktree's server entry point.
+
+    The server is taken from the agent worktree that was just verified, not from
+    the checkout this tool was run from. ``--agent`` therefore selects the Hub
+    identity, its worktree and the Hub code that will execute for it. The target
+    worktree may be dirty or stale: pinning the entry point only prevents running
+    another worktree's Hub code, it is not source-integrity assurance. Linked,
+    reparse-point or non-regular server paths fail closed like the database path.
+    """
     interpreter = Path(sys.executable)
-    if not interpreter.is_file() or not SERVER_PATH.is_file():
+    server = Path(worktree) / 'coordination_hub' / 'server.py'
+    try:
+        verify_configured_path(server)
+    except IdentityError as exc:
+        raise ProfileError(MESSAGES['runtime']) from exc
+    if not interpreter.is_file() or not server.is_file():
         raise ProfileError(MESSAGES['runtime'])
-    return str(interpreter), str(SERVER_PATH)
+    return str(interpreter), str(server)
 
 
 def build_config(agent, database=None):
@@ -115,7 +129,7 @@ def build_config(agent, database=None):
         verify_worktree(repository_root('nexuscore'), agent, worktree)
     except IdentityError as exc:
         raise ProfileError(MESSAGES['worktree']) from exc
-    interpreter, server = runtime_paths()
+    interpreter, server = runtime_paths(worktree)
     command = [interpreter, server, agent, str(database), str(worktree)]
     return {'mcp': {'servers': {'nexus_hub': {'type': 'local', 'command': command,
                                               'disabled': False}}}}
