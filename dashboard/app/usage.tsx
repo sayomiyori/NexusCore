@@ -9,13 +9,17 @@ import { usageIntervalError } from "../lib/usage-view.ts";
 export default function Usage({
   data,
   canFirst,
+  canPrevious,
   onFirst,
+  onPrevious,
   onNext,
   onExpired,
 }: {
   data: BotPage;
   canFirst: boolean;
+  canPrevious: boolean;
   onFirst: () => void;
+  onPrevious: () => void;
   onNext: () => void;
   onExpired: () => void;
 }) {
@@ -150,6 +154,14 @@ export default function Usage({
           onClick={onFirst}
         >
           First page
+        </button>
+        <button
+          type="button"
+          className="refresh"
+          disabled={!canPrevious}
+          onClick={onPrevious}
+        >
+          <span aria-hidden="true">←</span> Previous page
         </button>
         <button
           type="button"

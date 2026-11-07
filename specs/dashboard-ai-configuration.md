@@ -24,12 +24,16 @@ provider calls, job execution, worker activation or deployment changes.
   repeats fresh issuer membership then reads AgentHub with the same bearer.
   Validate exact returned scope/IDs/provider/model/boolean; allowlist projection
   and existing bounded private transport. Failures are not an unconfigured state.
-- Native AI Configuration section reuses paged active-bot selection, with
-  explicit Load configuration. Display operator-managed shared scope, provider,
-  selected model/unset state and processing flag. Explain that the flag is not
-  readiness and no bot-specific policy is stored. No activation or edit control.
-  Clear/abort on bot/scope/page/section/Refresh; ignore stale responses, shared
-  session expiry on401. Distinct unloaded/loading/unavailable/empty selection.
+- Native AI Configuration section reuses paged active-bot selection with
+  First/Previous/Next bot pages, and explicit Load configuration. Previous
+  re-reads a client-side visited cursor from the shared bot-page history; only a
+  successful non-aborted page read moves the navigation position. Display
+  operator-managed shared scope, provider, selected model/unset state and
+  processing flag. Explain that the flag is not readiness and no bot-specific
+  policy is stored. No activation or edit control. Clear/abort on
+  bot/scope/page/section/Refresh, including bot-page history; ignore stale
+  responses, shared session expiry on401. Distinct
+  unloaded/loading/unavailable/empty selection.
 - Preserve foreign WIP. Implement AgentHub's clean read-router change in an
   isolated branch from origin/main; never publish its existing local-only commit
   or WIP. Only fresh synthetic fixture data may be created; existing stands and
