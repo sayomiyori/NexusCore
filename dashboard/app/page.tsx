@@ -31,6 +31,7 @@ import Usage from "./usage.tsx";
 
 type TenantPage = { items: Tenant[]; hasMore: boolean; offset: number };
 type BotView = "bots" | "usage" | "configuration";
+type SettingsTarget = "tenant" | "bot";
 type Selection = {
   tenant: string;
   view:
@@ -66,6 +67,8 @@ export default function Page() {
     knowledge: "Knowledge Base",
   }[selection.view];
   const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsTarget, setSettingsTarget] =
+    useState<SettingsTarget>("tenant");
   const [knowledgeRefresh, setKnowledgeRefresh] = useState(0);
   const [botQuery, setBotQuery] = useState("");
   const [botPages, setBotPages] = useState<BotNavigation>(initialNavigation);
@@ -93,6 +96,7 @@ export default function Page() {
       setBotLoading(false);
       setBotPages(resetNavigation());
       setBotQuery("");
+      setSettingsTarget("tenant");
       setSelection((current) => ({
         tenant: id,
         view: view ?? current.view,
@@ -833,6 +837,8 @@ export default function Page() {
             <Configuration
               onSaving={setSavingSettings}
               data={data}
+              target={settingsTarget}
+              onTargetChange={setSettingsTarget}
               canFirst={canGoFirst(botPages)}
               canPrevious={canGoPrevious(botPages)}
               onFirst={() => pageBots({ kind: "first" }, "configuration")}
