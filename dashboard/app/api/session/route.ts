@@ -111,8 +111,8 @@ export async function DELETE(request: NextRequest) {
         undefined,
         {},
       );
-    } catch (error) {
-      failed = !(error instanceof ApiError && error.status === 401);
+    } catch {
+      failed = true;
     }
   }
   const response = reply(

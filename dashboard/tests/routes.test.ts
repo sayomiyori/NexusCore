@@ -33,6 +33,7 @@ let calls: {
   method: string;
   path: string;
   tenant?: string;
+  authorization?: string;
   payload: unknown;
 }[] = [];
 let mfa = false,
@@ -42,7 +43,7 @@ let mfa = false,
   conflict = false,
   malformed = false,
   empty = false;
-let logoutDown = false,
+let logoutStatus = 204,
   oversized = false,
   mismatched = false;
 let tenantRows: unknown = [safeTenant];
@@ -60,6 +61,7 @@ const server = http.createServer((req, res) => {
       method,
       path,
       tenant: req.headers["x-tenant-id"] as string | undefined,
+      authorization: req.headers.authorization,
       payload: raw ? JSON.parse(raw) : undefined,
     });
     res.setHeader("Content-Type", "application/json");
@@ -84,7 +86,7 @@ const server = http.createServer((req, res) => {
         token_type: "bearer",
       });
     if (path.endsWith("/auth/logout")) {
-      res.statusCode = logoutDown ? 503 : 204;
+      res.statusCode = logoutStatus;
       res.end();
       return;
     }
@@ -180,10 +182,10 @@ beforeEach(() => {
     conflict =
     malformed =
     empty =
-    logoutDown =
     oversized =
     mismatched =
       false;
+  logoutStatus = 204;
 });
 after(async () => {
   server.closeAllConnections();
@@ -343,7 +345,7 @@ test("session mutations reject foreign/missing Origin, wrong Host and malformed 
 });
 
 test("logout clears local cookies and accurately reports issuer failure", async () => {
-  logoutDown = true;
+  logoutStatus = 503;
   const response = await DELETE(request("/api/session", "DELETE"));
   assert.equal(response.status, 502);
   assert.match(JSON.stringify(await response.json()), /could not be confirmed/);
@@ -355,6 +357,54 @@ test("logout clears local cookies and accurately reports issuer failure", async 
   );
   assert.equal(calls[0].method, "POST");
   assert.equal(calls[0].path, "/api/v1/auth/logout");
+});
+
+test("issuer 401 logout is unconfirmed while 204 confirms and absent cookie is local-only", async () => {
+  logoutStatus = 401;
+  let response = await DELETE(request("/api/session", "DELETE"));
+  assert.equal(response.status, 502);
+  assert.deepEqual(await response.json(), {
+    error: "Local session cleared; issuer sign-out could not be confirmed.",
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, "/api/v1/auth/logout");
+  assert.equal(calls[0].authorization, "Bearer synthetic-access");
+  assert.equal(
+    response.headers
+      .getSetCookie()
+      .filter((value) => value.includes("Max-Age=0")).length,
+    2,
+  );
+
+  calls = [];
+  logoutStatus = 204;
+  response = await DELETE(request("/api/session", "DELETE"));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { signedOut: true });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].path, "/api/v1/auth/logout");
+  assert.equal(calls[0].authorization, "Bearer synthetic-access");
+  assert.equal(
+    response.headers
+      .getSetCookie()
+      .filter((value) => value.includes("Max-Age=0")).length,
+    2,
+  );
+
+  calls = [];
+  response = await DELETE(
+    request("/api/session", "DELETE", undefined, { cookie: "" }),
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { signedOut: true });
+  assert.equal(calls.length, 0);
+  assert.equal(
+    response.headers
+      .getSetCookie()
+      .filter((value) => value.includes("Max-Age=0")).length,
+    2,
+  );
 });
 
 test("membership list is fresh, projected and missing credentials fail before upstream", async () => {

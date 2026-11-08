@@ -1,5 +1,17 @@
 # Verification tooling errors
 
+## 2026-11-08: Logout reported success when the issuer rejected the token
+
+- Symptom: `DELETE /api/session` returned `200 {"signedOut":true}` although the
+  issuer logout request had returned 401, so revocation was never confirmed.
+- Cause: the logout handler treated an issuer 401 as an already-signed-out
+  success instead of an unconfirmed sign-out.
+- Fix: any failed issuer logout, including 401, returns the existing unconfirmed
+  502 response; local cookies still clear, while successful 204 and absent-cookie
+  requests keep their existing behavior. No refresh or automatic retry is added.
+- Detection: the route regression failed before the fix and now covers issuer
+  401, 204, 503 and an absent session cookie.
+
 ## 2026-10-29: Empty webhook preview POST was rejected in Next.js
 
 - Symptom: the first isolated dry-run check returned 400 before authorization.
