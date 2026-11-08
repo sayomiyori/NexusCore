@@ -34,6 +34,14 @@ provider calls, job execution, worker activation or deployment changes.
   bot/scope/page/section/Refresh, including bot-page history; ignore stale
   responses, shared session expiry on401. Distinct
   unloaded/loading/unavailable/empty selection.
+- The selected settings scope (`tenant`/`bot`) belongs to the page shell, not
+  the mounted section: it survives First/Previous/Next bot-page navigation and
+  resets to tenant default on organization change, section change, Refresh,
+  sign-out and session expiry. The selected bot and loaded settings stay local
+  to the section instance, so each newly loaded bot page selects its first
+  active bot and carries no earlier result. A page with no active bot still
+  shows the loaded-page guidance and keeps Load unavailable; no stale bot or
+  settings may survive a page/scope/tenant/section/Refresh/expiry change.
 - Preserve foreign WIP. Implement AgentHub's clean read-router change in an
   isolated branch from origin/main; never publish its existing local-only commit
   or WIP. Only fresh synthetic fixture data may be created; existing stands and

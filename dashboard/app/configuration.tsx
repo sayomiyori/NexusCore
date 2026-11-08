@@ -7,6 +7,8 @@ import { api, RequestError } from "../lib/client.ts";
 
 export default function Configuration({
   data,
+  target,
+  onTargetChange,
   canFirst,
   canPrevious,
   onFirst,
@@ -16,6 +18,8 @@ export default function Configuration({
   onSaving,
 }: {
   data: BotPage;
+  target: "tenant" | "bot";
+  onTargetChange: (value: "tenant" | "bot") => void;
   canFirst: boolean;
   canPrevious: boolean;
   onFirst: () => void;
@@ -25,7 +29,6 @@ export default function Configuration({
   onSaving: (value: boolean) => void;
 }) {
   const active = data.items.filter((bot) => bot.active);
-  const [target, setTarget] = useState<"tenant" | "bot">("tenant");
   const [selected, setSelected] = useState(active[0]?.id || "");
   const [result, setResult] = useState<AISettings | null>(null);
   const [model, setModel] = useState("");
@@ -151,7 +154,7 @@ export default function Configuration({
             disabled={saving}
             onChange={(event) => {
               clear();
-              setTarget(event.target.value as "tenant" | "bot");
+              onTargetChange(event.target.value as "tenant" | "bot");
             }}
           >
             <option value="tenant">Tenant default</option>
