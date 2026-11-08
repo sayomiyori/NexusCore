@@ -30,9 +30,15 @@ no sniffing/referrer or external fonts/scripts. No unsafe-inline scripts.
   only in short HttpOnly SameSite=Strict cookies (Secure in production).
   Return success/challenge state, never either token or refresh credentials.
   Existing issuer rate limits and 2FA/backup codes remain authoritative.
-- `DELETE /api/session` requires same-origin validation, requests issuer logout
-  and clears local cookies even if revocation fails. Do not claim issuer logout
-  succeeded when unavailable. No refresh/registration/OAuth flow in this increment.
+- `DELETE /api/session` requires same-origin validation and always clears local
+  cookies even if revocation fails. When a session token is present it requests
+  issuer logout; report confirmed issuer sign-out only when that request
+  succeeds (the existing accepted 204). An issuer 401, any other issuer failure
+  or an unreachable issuer returns the existing unconfirmed 502 response and
+  must not claim issuer logout succeeded. With no session token there is no
+  issuer call: the route clears cookies and reports local-only sign-out success,
+  which is not confirmed issuer logout. No refresh/registration/OAuth flow in
+  this increment.
 - `GET /api/tenants?offset=N` queries the issuer's current membership list in
   bounded pages, returning only canonical UUID/name/owner-or-member role.
 - `GET /api/overview?tenant=UUID` first reads canonical issuer tenant membership.
