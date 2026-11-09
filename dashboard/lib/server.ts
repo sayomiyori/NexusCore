@@ -114,6 +114,14 @@ export function challengeCookieName(): string {
   return httpsOrigin() ? "__Host-nexus_challenge" : "nexus_challenge";
 }
 
+// The issuer's default refresh lifetime is 30 days. The cookie only stores the
+// credential already issued by the issuer; it does not extend that lifetime.
+export const refreshCookieMaxAge = 30 * 24 * 60 * 60;
+
+export function refreshCookieName(): string {
+  return httpsOrigin() ? "__Host-nexus_refresh" : "nexus_refresh";
+}
+
 export function singleCookie(
   request: NextRequest,
   name: string,

@@ -122,9 +122,14 @@ read. AgentHub requires `PLATFORM_TENANT_ENABLED=true` on the isolated service;
 enabling that feature on an existing deployment is a separate operation. The
 view does not upload, delete, expose file paths or run embeddings.
 - Access and temporary 2FA credentials stay in HttpOnly, SameSite=Strict cookies.
-  The server discards refresh credentials; access cookies expire after 15 minutes.
-  Sign in again when the issuer session expires. Existing issuer rate limits,
-  2FA/backup codes and membership authorization remain authoritative.
+  The issuer refresh credential is kept only in a separate HttpOnly,
+  SameSite=Strict cookie (Secure in production) and is used only for durable
+  sign-out through AuthFortress `/logout/refresh`; it is never exposed to
+  browser JavaScript or returned in JSON/HTML, and it is not used to refresh
+  access. Access cookies still expire after 15 minutes, so sign in again when
+  the access session expires. Unconfirmed issuer failures and login/logout
+  cross-tab races remain possible. Existing issuer rate limits, 2FA/backup codes
+  and membership authorization remain authoritative.
 - Each Overview request checks current issuer membership before any sink query.
   Every sink request carries that identity and canonical tenant scope. No shared
   user cache, sibling imports, database access or secret-bearing browser config.
@@ -153,9 +158,10 @@ view does not upload, delete, expose file paths or run embeddings.
   older supported observations are not scanned automatically.
 - Organization pages contain up to 50 memberships. Tenant switches clear prior
   observations and abort stale reads. Logout clears cookies and requests issuer
-  revocation; failures say when issuer sign-out could not be confirmed.
+  revocation with the access and/or refresh credential; failures say when issuer
+  sign-out could not be confirmed.
 
-No user registration, OAuth, session refresh workflow, bot editing or deactivation, processing activation, billing, Telegram alerts,
+No user registration, OAuth, automatic session refresh workflow, bot editing or deactivation, processing activation, billing, Telegram alerts,
 public deployment or main-stack activation in this increment.
 
 Contract: [dashboard-overview.md](../specs/dashboard-overview.md).

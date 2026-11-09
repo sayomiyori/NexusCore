@@ -44,6 +44,12 @@ let mfa = false,
   malformed = false,
   empty = false;
 let logoutStatus = 204,
+  logoutRefreshStatus = 204,
+  failLogoutToken = "",
+  failRefreshToken = "",
+  revokeOnFirstAccess = false,
+  accessRevoked = false,
+  badRefresh = false,
   oversized = false,
   mismatched = false;
 let tenantRows: unknown = [safeTenant];
@@ -75,7 +81,7 @@ const server = http.createServer((req, res) => {
           ? { requires_2fa: true, temp_token: "synthetic-challenge" }
           : {
               access_token: "synthetic-access",
-              refresh_token: "private-refresh-secret",
+              refresh_token: badRefresh ? 42 : "private-refresh-secret",
               token_type: "bearer",
             },
       );
@@ -85,8 +91,29 @@ const server = http.createServer((req, res) => {
         refresh_token: "private-refresh-secret",
         token_type: "bearer",
       });
+    if (path.endsWith("/auth/logout/refresh")) {
+      if (logoutRefreshStatus === 200) return send({});
+      const refreshToken = raw ? JSON.parse(raw).refresh_token : undefined;
+      res.statusCode =
+        failRefreshToken && refreshToken === failRefreshToken
+          ? 401
+          : logoutRefreshStatus;
+      res.end();
+      return;
+    }
     if (path.endsWith("/auth/logout")) {
-      res.statusCode = logoutStatus;
+      if (logoutStatus === 200) return send({});
+      if (revokeOnFirstAccess) {
+        res.statusCode = accessRevoked ? 401 : 204;
+        accessRevoked = true;
+        res.end();
+        return;
+      }
+      res.statusCode =
+        failLogoutToken &&
+        req.headers.authorization === `Bearer ${failLogoutToken}`
+          ? 401
+          : logoutStatus;
       res.end();
       return;
     }
@@ -186,6 +213,12 @@ beforeEach(() => {
     mismatched =
       false;
   logoutStatus = 204;
+  logoutRefreshStatus = 204;
+  failLogoutToken = "";
+  failRefreshToken = "";
+  revokeOnFirstAccess = false;
+  accessRevoked = false;
+  badRefresh = false;
 });
 after(async () => {
   server.closeAllConnections();
@@ -231,15 +264,30 @@ test("login keeps access/refresh credentials out of JSON and secures production 
       ),
     );
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { requires2fa: false });
-    const cookies = response.headers.getSetCookie().join(";");
-    assert.match(cookies, /__Host-nexus_session=/);
-    assert.match(cookies, /HttpOnly/);
-    assert.match(cookies, /Secure/);
-    assert.match(cookies, /SameSite=strict/);
-    assert.match(cookies, /Path=\//);
-    assert(!cookies.includes("Domain="));
-    assert(!cookies.includes("private-refresh-secret"));
+    const body = await response.json();
+    assert.deepEqual(body, { requires2fa: false });
+    assert(!JSON.stringify(body).includes("private-refresh-secret"));
+    const cookies = response.headers.getSetCookie();
+    const session = cookies.find((value) =>
+      value.startsWith("__Host-nexus_session="),
+    );
+    const refresh = cookies.find((value) =>
+      value.startsWith("__Host-nexus_refresh="),
+    );
+    assert(session);
+    assert(refresh);
+    assert.match(session, /HttpOnly/);
+    assert.match(session, /Secure/);
+    assert.match(session, /SameSite=strict/);
+    assert.match(session, /Path=\//);
+    assert.match(session, /Max-Age=900/);
+    assert.match(refresh, /private-refresh-secret/);
+    assert.match(refresh, /HttpOnly/);
+    assert.match(refresh, /Secure/);
+    assert.match(refresh, /SameSite=strict/);
+    assert.match(refresh, /Path=\//);
+    assert.match(refresh, /Max-Age=2592000/);
+    assert(!cookies.some((value) => value.includes("Domain=")));
     assert.match(response.headers.get("cache-control") || "", /no-store/);
   } finally {
     if (original === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
@@ -263,6 +311,7 @@ test("production loopback keeps legacy cookie names but still sets Secure", asyn
     assert.equal(response.status, 200);
     const cookies = response.headers.getSetCookie().join(";");
     assert.match(cookies, /nexus_session=/);
+    assert.match(cookies, /nexus_refresh=private-refresh-secret/);
     assert(!cookies.includes("__Host-"));
     assert.match(cookies, /Secure/);
     assert.match(cookies, /HttpOnly/);
@@ -295,6 +344,14 @@ test("2FA challenges stay HttpOnly and code exchange uses issuer contract", asyn
       .getSetCookie()
       .some(
         (value) =>
+          value.startsWith("nexus_refresh=;") && value.includes("Max-Age=0"),
+      ),
+  );
+  assert(
+    first.headers
+      .getSetCookie()
+      .some(
+        (value) =>
           value.includes("synthetic-challenge") && value.includes("HttpOnly"),
       ),
   );
@@ -311,7 +368,29 @@ test("2FA challenges stay HttpOnly and code exchange uses issuer contract", asyn
     temp_token: "synthetic-challenge",
     code: "123456",
   });
-  assert(!JSON.stringify(await second.json()).includes("synthetic-access"));
+  const secondBody = await second.json();
+  assert(!JSON.stringify(secondBody).includes("synthetic-access"));
+  assert(
+    second.headers
+      .getSetCookie()
+      .some(
+        (value) =>
+          value.startsWith("nexus_refresh=private-refresh-secret") &&
+          value.includes("Max-Age=2592000"),
+      ),
+  );
+});
+
+test("login rejects a malformed refresh credential before setting any auth cookie", async () => {
+  badRefresh = true;
+  const response = await POST(
+    request("/api/session", "POST", {
+      email: "test@example.com",
+      password: "synthetic-password",
+    }),
+  );
+  assert.equal(response.status, 401);
+  assert.equal(response.headers.getSetCookie().length, 0);
 });
 
 test("session mutations reject foreign/missing Origin, wrong Host and malformed input before upstream", async () => {
@@ -344,7 +423,7 @@ test("session mutations reject foreign/missing Origin, wrong Host and malformed 
   assert.equal(calls.length, 0);
 });
 
-test("logout clears local cookies and accurately reports issuer failure", async () => {
+test("logout reports unconfirmed when the presented access credential fails", async () => {
   logoutStatus = 503;
   const response = await DELETE(request("/api/session", "DELETE"));
   assert.equal(response.status, 502);
@@ -353,47 +432,336 @@ test("logout clears local cookies and accurately reports issuer failure", async 
     response.headers
       .getSetCookie()
       .filter((value) => value.includes("Max-Age=0")).length,
-    2,
+    6,
   );
+  assert.equal(calls.length, 1);
   assert.equal(calls[0].method, "POST");
   assert.equal(calls[0].path, "/api/v1/auth/logout");
 });
 
-test("issuer 401 logout is unconfirmed while 204 confirms and absent cookie is local-only", async () => {
+test("logout confirms only when every presented credential returns 204", async () => {
+  const response = await DELETE(
+    request("/api/session", "DELETE", undefined, {
+      cookie:
+        "nexus_session=synthetic-access; nexus_refresh=private-refresh-secret",
+    }),
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body, { signedOut: true });
+  assert(!JSON.stringify(body).includes("private-refresh-secret"));
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].path, "/api/v1/auth/logout");
+  assert.equal(calls[1].path, "/api/v1/auth/logout/refresh");
+  const accessCall = calls.find((call) => call.path === "/api/v1/auth/logout");
+  const refreshCall = calls.find(
+    (call) => call.path === "/api/v1/auth/logout/refresh",
+  );
+  assert(accessCall);
+  assert(refreshCall);
+  assert.equal(accessCall.authorization, "Bearer synthetic-access");
+  assert.deepEqual(accessCall.payload, {});
+  assert.equal(refreshCall.authorization, undefined);
+  assert.deepEqual(refreshCall.payload, {
+    refresh_token: "private-refresh-secret",
+  });
+  assert.equal(
+    response.headers
+      .getSetCookie()
+      .filter((value) => value.includes("Max-Age=0")).length,
+    6,
+  );
+});
+
+test("expired access cookie revokes the issuer session with the refresh credential", async () => {
+  const response = await DELETE(
+    request("/api/session", "DELETE", undefined, {
+      cookie: "nexus_refresh=private-refresh-secret",
+    }),
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { signedOut: true });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, "/api/v1/auth/logout/refresh");
+  assert.equal(calls[0].authorization, undefined);
+  assert.deepEqual(calls[0].payload, {
+    refresh_token: "private-refresh-secret",
+  });
+  assert.equal(
+    response.headers
+      .getSetCookie()
+      .filter((value) => value.includes("Max-Age=0")).length,
+    6,
+  );
+});
+
+test("a failure from either presented credential is unconfirmed without retry", async () => {
+  const both = {
+    cookie:
+      "nexus_session=synthetic-access; nexus_refresh=private-refresh-secret",
+  };
   logoutStatus = 401;
-  let response = await DELETE(request("/api/session", "DELETE"));
+  let response = await DELETE(
+    request("/api/session", "DELETE", undefined, both),
+  );
   assert.equal(response.status, 502);
   assert.deepEqual(await response.json(), {
     error: "Local session cleared; issuer sign-out could not be confirmed.",
   });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].path, "/api/v1/auth/logout");
-  assert.equal(calls[0].authorization, "Bearer synthetic-access");
-  assert.equal(
-    response.headers
-      .getSetCookie()
-      .filter((value) => value.includes("Max-Age=0")).length,
-    2,
-  );
+  assert.equal(calls.length, 2);
+  assert(calls.some((call) => call.path === "/api/v1/auth/logout"));
+  assert(calls.some((call) => call.path === "/api/v1/auth/logout/refresh"));
 
   calls = [];
   logoutStatus = 204;
-  response = await DELETE(request("/api/session", "DELETE"));
-  assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { signedOut: true });
+  logoutRefreshStatus = 401;
+  response = await DELETE(request("/api/session", "DELETE", undefined, both));
+  assert.equal(response.status, 502);
+  assert.equal(calls.length, 2);
+
+  calls = [];
+  logoutRefreshStatus = 503;
+  response = await DELETE(
+    request("/api/session", "DELETE", undefined, {
+      cookie: "nexus_refresh=private-refresh-secret",
+    }),
+  );
+  assert.equal(response.status, 502);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].method, "POST");
-  assert.equal(calls[0].path, "/api/v1/auth/logout");
-  assert.equal(calls[0].authorization, "Bearer synthetic-access");
+  assert.equal(calls[0].path, "/api/v1/auth/logout/refresh");
   assert.equal(
     response.headers
       .getSetCookie()
       .filter((value) => value.includes("Max-Age=0")).length,
-    2,
+    6,
   );
 
   calls = [];
+  logoutRefreshStatus = 401;
   response = await DELETE(
+    request("/api/session", "DELETE", undefined, {
+      cookie: "nexus_refresh=private-refresh-secret",
+    }),
+  );
+  assert.equal(response.status, 502);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, "/api/v1/auth/logout/refresh");
+});
+
+test("unexpected 200 from either logout endpoint is unconfirmed", async () => {
+  logoutStatus = 200;
+  let response = await DELETE(request("/api/session", "DELETE"));
+  assert.equal(response.status, 502);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, "/api/v1/auth/logout");
+
+  calls = [];
+  logoutStatus = 204;
+  logoutRefreshStatus = 200;
+  response = await DELETE(
+    request("/api/session", "DELETE", undefined, {
+      cookie: "nexus_refresh=private-refresh-secret",
+    }),
+  );
+  assert.equal(response.status, 502);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, "/api/v1/auth/logout/refresh");
+});
+
+test("HTTPS revokes every distinct access and refresh cookie value", async () => {
+  const original = process.env.NODE_ENV;
+  const originalOrigin = process.env.DASHBOARD_ORIGIN;
+  Object.assign(process.env, {
+    NODE_ENV: "production",
+    DASHBOARD_ORIGIN: "https://127.0.0.1:3000",
+  });
+  try {
+    const response = await DELETE(
+      request("/api/session", "DELETE", undefined, {
+        origin: "https://127.0.0.1:3000",
+        cookie:
+          "__Host-nexus_session=preferred-access; nexus_session=legacy-access; __Host-nexus_refresh=preferred-refresh; nexus_refresh=legacy-refresh",
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { signedOut: true });
+    assert.equal(calls.length, 4);
+    for (const token of ["preferred-access", "legacy-access"])
+      assert(
+        calls.some(
+          (call) =>
+            call.path === "/api/v1/auth/logout" &&
+            call.authorization === `Bearer ${token}`,
+        ),
+      );
+    for (const token of ["preferred-refresh", "legacy-refresh"])
+      assert(
+        calls.some(
+          (call) =>
+            call.path === "/api/v1/auth/logout/refresh" &&
+            (call.payload as { refresh_token?: string }).refresh_token ===
+              token,
+        ),
+      );
+    const cookies = response.headers.getSetCookie();
+    for (const name of [
+      "__Host-nexus_session=;",
+      "nexus_session=;",
+      "__Host-nexus_refresh=;",
+      "nexus_refresh=;",
+    ])
+      assert(cookies.some((value) => value.startsWith(name)));
+  } finally {
+    if (original === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
+    else Object.assign(process.env, { NODE_ENV: original });
+    if (originalOrigin === undefined)
+      Reflect.deleteProperty(process.env, "DASHBOARD_ORIGIN");
+    else Object.assign(process.env, { DASHBOARD_ORIGIN: originalOrigin });
+  }
+});
+
+test("one failing mixed HTTPS credential is unconfirmed", async () => {
+  const original = process.env.NODE_ENV;
+  const originalOrigin = process.env.DASHBOARD_ORIGIN;
+  Object.assign(process.env, {
+    NODE_ENV: "production",
+    DASHBOARD_ORIGIN: "https://127.0.0.1:3000",
+  });
+  try {
+    failRefreshToken = "legacy-refresh";
+    let response = await DELETE(
+      request("/api/session", "DELETE", undefined, {
+        origin: "https://127.0.0.1:3000",
+        cookie:
+          "__Host-nexus_session=preferred-access; nexus_session=legacy-access; __Host-nexus_refresh=preferred-refresh; nexus_refresh=legacy-refresh",
+      }),
+    );
+    assert.equal(response.status, 502);
+    assert.equal(calls.length, 4);
+
+    calls = [];
+    failRefreshToken = "";
+    failLogoutToken = "legacy-access";
+    response = await DELETE(
+      request("/api/session", "DELETE", undefined, {
+        origin: "https://127.0.0.1:3000",
+        cookie:
+          "__Host-nexus_session=preferred-access; nexus_session=legacy-access; __Host-nexus_refresh=preferred-refresh; nexus_refresh=legacy-refresh",
+      }),
+    );
+    assert.equal(response.status, 502);
+    assert.equal(calls.length, 4);
+  } finally {
+    if (original === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
+    else Object.assign(process.env, { NODE_ENV: original });
+    if (originalOrigin === undefined)
+      Reflect.deleteProperty(process.env, "DASHBOARD_ORIGIN");
+    else Object.assign(process.env, { DASHBOARD_ORIGIN: originalOrigin });
+  }
+});
+
+test("HTTPS revokes legacy-only credentials", async () => {
+  const original = process.env.NODE_ENV;
+  const originalOrigin = process.env.DASHBOARD_ORIGIN;
+  Object.assign(process.env, {
+    NODE_ENV: "production",
+    DASHBOARD_ORIGIN: "https://127.0.0.1:3000",
+  });
+  try {
+    const response = await DELETE(
+      request("/api/session", "DELETE", undefined, {
+        origin: "https://127.0.0.1:3000",
+        cookie: "nexus_session=legacy-access; nexus_refresh=legacy-refresh",
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 2);
+    assert(
+      calls.some(
+        (call) =>
+          call.path === "/api/v1/auth/logout" &&
+          call.authorization === "Bearer legacy-access",
+      ),
+    );
+    assert(
+      calls.some(
+        (call) =>
+          call.path === "/api/v1/auth/logout/refresh" &&
+          (call.payload as { refresh_token?: string }).refresh_token ===
+            "legacy-refresh",
+      ),
+    );
+  } finally {
+    if (original === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
+    else Object.assign(process.env, { NODE_ENV: original });
+    if (originalOrigin === undefined)
+      Reflect.deleteProperty(process.env, "DASHBOARD_ORIGIN");
+    else Object.assign(process.env, { DASHBOARD_ORIGIN: originalOrigin });
+  }
+});
+
+test("identical preferred and legacy values are deduplicated", async () => {
+  const response = await DELETE(
+    request("/api/session", "DELETE", undefined, {
+      cookie:
+        "__Host-nexus_session=same-access; nexus_session=same-access; __Host-nexus_refresh=same-refresh; nexus_refresh=same-refresh",
+    }),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 2);
+  assert(
+    calls.some(
+      (call) =>
+        call.path === "/api/v1/auth/logout" &&
+        call.authorization === "Bearer same-access",
+    ),
+  );
+  assert(
+    calls.some(
+      (call) =>
+        call.path === "/api/v1/auth/logout/refresh" &&
+        (call.payload as { refresh_token?: string }).refresh_token ===
+          "same-refresh",
+    ),
+  );
+});
+
+test("HTTP mixed host-prefixed and legacy credentials are all attempted", async () => {
+  const mixed = {
+    cookie:
+      "__Host-nexus_session=host-access; nexus_session=legacy-access; __Host-nexus_refresh=host-refresh; nexus_refresh=legacy-refresh",
+  };
+  let response = await DELETE(
+    request("/api/session", "DELETE", undefined, mixed),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 4);
+  for (const token of ["host-access", "legacy-access"])
+    assert(
+      calls.some(
+        (call) =>
+          call.path === "/api/v1/auth/logout" &&
+          call.authorization === `Bearer ${token}`,
+      ),
+    );
+  for (const token of ["host-refresh", "legacy-refresh"])
+    assert(
+      calls.some(
+        (call) =>
+          call.path === "/api/v1/auth/logout/refresh" &&
+          (call.payload as { refresh_token?: string }).refresh_token === token,
+      ),
+    );
+
+  calls = [];
+  failRefreshToken = "legacy-refresh";
+  response = await DELETE(request("/api/session", "DELETE", undefined, mixed));
+  assert.equal(response.status, 502);
+  assert.equal(calls.length, 4);
+});
+
+test("absent cookies are local-only success", async () => {
+  const response = await DELETE(
     request("/api/session", "DELETE", undefined, { cookie: "" }),
   );
   assert.equal(response.status, 200);
@@ -403,8 +771,45 @@ test("issuer 401 logout is unconfirmed while 204 confirms and absent cookie is l
     response.headers
       .getSetCookie()
       .filter((value) => value.includes("Max-Age=0")).length,
-    2,
+    6,
   );
+});
+
+test("duplicate refresh cookies fail locally and clear all cookies", async () => {
+  const response = await DELETE(
+    request("/api/session", "DELETE", undefined, {
+      cookie:
+        "nexus_session=synthetic-access; nexus_refresh=one; nexus_refresh=two",
+    }),
+  );
+  assert.equal(response.status, 400);
+  assert.equal(calls.length, 0);
+  const cleared = response.headers
+    .getSetCookie()
+    .filter((value) => value.includes("Max-Age=0"));
+  assert.equal(cleared.length, 6);
+  assert(cleared.some((value) => value.startsWith("nexus_refresh=;")));
+});
+
+test("access failure without a refresh cookie is not retried", async () => {
+  logoutStatus = 401;
+  const response = await DELETE(request("/api/session", "DELETE"));
+  assert.equal(response.status, 502);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, "/api/v1/auth/logout");
+});
+
+test("a second distinct access credential after revocation is unconfirmed", async () => {
+  revokeOnFirstAccess = true;
+  const response = await DELETE(
+    request("/api/session", "DELETE", undefined, {
+      cookie: "__Host-nexus_session=one; nexus_session=two",
+    }),
+  );
+  assert.equal(response.status, 502);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].authorization, "Bearer one");
+  assert.equal(calls[1].authorization, "Bearer two");
 });
 
 test("membership list is fresh, projected and missing credentials fail before upstream", async () => {

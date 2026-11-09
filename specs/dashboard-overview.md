@@ -27,18 +27,41 @@ no sniffing/referrer or external fonts/scripts. No unsafe-inline scripts.
 
 - `POST /api/session` accepts only bounded JSON email/password, or a 2FA code.
   Proxy to existing issuer login/login-2fa routes; keep temp_token/access_token
-  only in short HttpOnly SameSite=Strict cookies (Secure in production).
-  Return success/challenge state, never either token or refresh credentials.
-  Existing issuer rate limits and 2FA/backup codes remain authoritative.
-- `DELETE /api/session` requires same-origin validation and always clears local
-  cookies even if revocation fails. When a session token is present it requests
-  issuer logout; report confirmed issuer sign-out only when that request
-  succeeds (the existing accepted 204). An issuer 401, any other issuer failure
-  or an unreachable issuer returns the existing unconfirmed 502 response and
-  must not claim issuer logout succeeded. With no session token there is no
-  issuer call: the route clears cookies and reports local-only sign-out success,
-  which is not confirmed issuer logout. No refresh/registration/OAuth flow in
-  this increment.
+  only in short HttpOnly SameSite=Strict cookies (Secure in production). Keep
+  the issuer refresh credential in a separate HttpOnly SameSite=Strict cookie
+  (Secure in production; `__Host-` name on HTTPS, legacy name otherwise) with
+  a 30-day browser lifetime matching the issuer default. The cookie does not
+  extend or redefine the issuer's own refresh-token expiry: if the issuer is
+  configured shorter, refresh logout returns 401 and is reported unconfirmed;
+  if configured longer, the browser simply loses durable logout at 30 days.
+  Return success/challenge state; never return either token or refresh
+  credentials in JSON/HTML. Validate both returned credentials before setting
+  either auth cookie; clear the old refresh cookie on a 2FA challenge. Existing
+  issuer rate limits and 2FA/backup codes remain authoritative.
+- `DELETE /api/session` requires same-origin validation and always clears both
+  preferred and legacy local access, refresh and challenge cookie names even if
+  revocation fails. For every
+  distinct credential value presented under the preferred or legacy
+  access/refresh cookie names it makes exactly one issuer call: each access
+  value uses `POST /api/v1/auth/logout` with the Bearer token; each refresh
+  value uses `POST /api/v1/auth/logout/refresh` with
+  `{"refresh_token": ...}`. The refresh token is never used as authorization
+  and never sent to `/logout`, a non-AuthFortress origin, response JSON/HTML,
+  logs or a URL. Report confirmed issuer sign-out (`200 {"signedOut":true}`) only when at
+  least one credential was presented and every presented call returned the
+  accepted 204. Any 401, other issuer failure or unreachable issuer returns the
+  existing unconfirmed 502 response, without retry, and must not claim issuer
+  logout succeeded. With no auth cookie there is no issuer call: the route
+  clears cookies and reports local-only sign-out success, which is not
+  confirmed issuer logout. A 204 proves only that the presented credential's
+  session id was revoked; independent login sessions for the same user are not
+  claimed. Duplicate values for one cookie name fail closed with 400 and all
+  local cookies are cleared. This path depends on AuthFortress PR 4 (merge
+  `3df11e0`) providing `/logout/refresh`; the dashboard does not rate-limit it,
+  but the issuer only revokes the session named by the token. An unconfirmed
+  response does not prevent a late `Set-Cookie` from another request, and no
+  client generation guard is added. No automatic access-token refresh,
+  registration or OAuth flow in this increment.
 - `GET /api/tenants?offset=N` queries the issuer's current membership list in
   bounded pages, returning only canonical UUID/name/owner-or-member role.
 - `GET /api/overview?tenant=UUID` first reads canonical issuer tenant membership.
@@ -91,6 +114,9 @@ responsive 360px and desktop layout, AA contrast and reduced-motion support.
    or hydration errors; verify HttpOnly/CSP/no local token storage. Review fresh
    adversarial/security context, preserve all original data/config/resource/WSL
    fingerprints, stop only new owned fixtures and retain data.
-4. Scope commit/push and verify root/dashboard CI. Document local limits: no
-   session refresh, partial recent windows, snapshot health and explicit private
-   deployment configuration. Real providers and root activation stay disabled.
+4. Scope commit/push and verify root/dashboard CI. Document local limits: access
+   sessions still expire after 15 minutes and are not refreshed automatically;
+   the refresh credential is used only for durable sign-out, late issuer
+   responses and cross-tab races remain documented limits, partial recent
+   windows, snapshot health and explicit private deployment configuration.
+   Real providers and root activation stay disabled.
