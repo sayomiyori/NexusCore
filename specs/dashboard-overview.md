@@ -47,13 +47,26 @@ no sniffing/referrer or external fonts/scripts. No unsafe-inline scripts.
   value uses `POST /api/v1/auth/logout/refresh` with
   `{"refresh_token": ...}`. The refresh token is never used as authorization
   and never sent to `/logout`, a non-AuthFortress origin, response JSON/HTML,
-  logs or a URL. Report confirmed issuer sign-out (`200 {"signedOut":true}`) only when at
-  least one credential was presented and every presented call returned the
-  accepted 204. Any 401, other issuer failure or unreachable issuer returns the
-  existing unconfirmed 502 response, without retry, and must not claim issuer
-  logout succeeded. With no auth cookie there is no issuer call: the route
-  clears cookies and reports local-only sign-out success, which is not
-  confirmed issuer logout. A 204 proves only that the presented credential's
+  logs or a URL. Report confirmed issuer sign-out as
+  `200 {"signedOut":true,"revoked":N}` only when at least one credential was
+  presented and every presented call returned the accepted 204; `N` is the
+  number of distinct presented credential values. Any 401, other issuer failure
+  or unreachable issuer returns the existing unconfirmed 502 response, without
+  retry, and must not claim issuer logout succeeded. With no auth cookie there is
+  no issuer call: the route clears cookies and reports local-only sign-out
+  success with `revoked:0`, which is not confirmed issuer logout. The login
+  screen reached by a 401 offers `Sign out previous session` before a new login
+  can overwrite the retained refresh cookie; it reports confirmed sign-out only
+  for a positive `revoked` count, reports that no stored session was found for
+  zero, and shows the unconfirmed 502 copy otherwise. Login and both sign-out
+  actions share a synchronous same-tab in-flight guard that is held until the
+  DELETE settles. A pending sign-out is not aborted by expiry or by a login
+  attempt: aborting the client request cannot cancel the server-side response
+  or the cookie clearing it carries, and a cross-tab late response remains
+  possible. A 403 guard failure or an uncertain transport failure keeps the
+  sign-out control available for retry rather than assuming cookies were
+  cleared; only a 200 response ends the retry window. A 204 proves only that
+  the presented credential's
   session id was revoked; independent login sessions for the same user are not
   claimed. Duplicate values for one cookie name fail closed with 400 and all
   local cookies are cleared. This path depends on AuthFortress PR 4 (merge
@@ -111,7 +124,10 @@ responsive 360px and desktop layout, AA contrast and reduced-motion support.
    rather than granting the fixture an external network route.
    Test cross-tenant/expired/logout and degraded reads, no business writes.
 3. Browser checks actual login/Overview/logout at desktop and mobile, no console
-   or hydration errors; verify HttpOnly/CSP/no local token storage. Review fresh
+   or hydration errors; verify HttpOnly/CSP/no local token storage. Expire only
+   the access cookie, reload the dashboard and confirm the login-screen sign-out
+   revokes the retained refresh credential; check fresh/no-cookie and
+   unconfirmed-issuer states without false revocation claims. Review fresh
    adversarial/security context, preserve all original data/config/resource/WSL
    fingerprints, stop only new owned fixtures and retain data.
 4. Scope commit/push and verify root/dashboard CI. Document local limits: access

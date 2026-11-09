@@ -404,11 +404,13 @@ test("session mutations reject foreign/missing Origin, wrong Host and malformed 
       (await POST(request("/api/session", "POST", {}, headers))).status,
       403,
     );
-    assert.equal(
-      (await DELETE(request("/api/session", "DELETE", undefined, headers)))
-        .status,
-      403,
+    // Guard failures happen before the route can clear cookies. The client must
+    // not treat this response as proof that the local session was removed.
+    const denied = await DELETE(
+      request("/api/session", "DELETE", undefined, headers),
     );
+    assert.equal(denied.status, 403);
+    assert.equal(denied.headers.getSetCookie().length, 0);
   }
   for (const input of [
     {},
@@ -448,7 +450,7 @@ test("logout confirms only when every presented credential returns 204", async (
   );
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.deepEqual(body, { signedOut: true });
+  assert.deepEqual(body, { signedOut: true, revoked: 2 });
   assert(!JSON.stringify(body).includes("private-refresh-secret"));
   assert.equal(calls.length, 2);
   assert.equal(calls[0].path, "/api/v1/auth/logout");
@@ -480,7 +482,7 @@ test("expired access cookie revokes the issuer session with the refresh credenti
     }),
   );
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { signedOut: true });
+  assert.deepEqual(await response.json(), { signedOut: true, revoked: 1 });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].path, "/api/v1/auth/logout/refresh");
   assert.equal(calls[0].authorization, undefined);
@@ -584,7 +586,7 @@ test("HTTPS revokes every distinct access and refresh cookie value", async () =>
       }),
     );
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { signedOut: true });
+    assert.deepEqual(await response.json(), { signedOut: true, revoked: 4 });
     assert.equal(calls.length, 4);
     for (const token of ["preferred-access", "legacy-access"])
       assert(
@@ -765,7 +767,7 @@ test("absent cookies are local-only success", async () => {
     request("/api/session", "DELETE", undefined, { cookie: "" }),
   );
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { signedOut: true });
+  assert.deepEqual(await response.json(), { signedOut: true, revoked: 0 });
   assert.equal(calls.length, 0);
   assert.equal(
     response.headers

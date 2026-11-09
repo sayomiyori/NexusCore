@@ -172,13 +172,16 @@ export async function DELETE(request: NextRequest) {
       failed = true;
     }
   }
+  // Count distinct presented credentials so the client can distinguish a
+  // confirmed issuer revocation from a local-only clear with no cookie.
+  const revoked = access.length + refresh.length;
   const response = reply(
     failed
       ? {
           error:
             "Local session cleared; issuer sign-out could not be confirmed.",
         }
-      : { signedOut: true },
+      : { signedOut: true, revoked },
     failed ? 502 : 200,
   );
   clearSessionCookies(response);
