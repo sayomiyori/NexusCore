@@ -80,10 +80,16 @@ export default function Page() {
     "loading" | "ready" | "error"
   >("loading");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [previousSession, setPreviousSession] = useState(false);
   const [busy, setBusy] = useState(false);
   const [mfa, setMfa] = useState(false);
   const query = useRef<AbortController | null>(null);
   const membershipQuery = useRef<AbortController | null>(null);
+  // Synchronous same-tab guard shared by login and both sign-out actions. React
+  // state updates are async, so `busy` alone cannot stop a second submit that
+  // slips in before the next render.
+  const authInFlight = useRef(false);
   const codeInput = useRef<HTMLInputElement>(null);
   const botPageRequest = useRef(false);
 
@@ -121,14 +127,20 @@ export default function Page() {
   }, []);
 
   const expire = useCallback(() => {
+    // Never abort a pending sign-out here. Aborting the fetch only discards the
+    // client-side promise; it cannot cancel the server response or the cookie
+    // clearing that response carries. The in-flight guard owns `busy` until the
+    // DELETE actually settles.
     membershipQuery.current?.abort();
     choose("");
     setTenants([]);
     setHasMore(false);
     setOffset(0);
-    setBusy(false);
+    if (!authInFlight.current) setBusy(false);
     setScreen("login");
     setMfa(false);
+    setNotice("");
+    setPreviousSession(true);
     setError("Your session expired. Sign in again.");
   }, [choose]);
 
@@ -162,8 +174,9 @@ export default function Page() {
       .catch((reason) => {
         if (!controller.signal.aborted) {
           setScreen("login");
-          if (!(reason instanceof RequestError && reason.status === 401))
-            setError("Unable to load your workspace. Try signing in again.");
+          if (reason instanceof RequestError && reason.status === 401)
+            setPreviousSession(true);
+          else setError("Unable to load your workspace. Try signing in again.");
         }
       });
     return () => {
@@ -214,10 +227,17 @@ export default function Page() {
 
   async function signIn(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
+    // A login must never race a pending previous-session sign-out: its late
+    // Set-Cookie clearing could log out the credentials just issued here. The
+    // guard is checked and set synchronously, and the pending DELETE is left
+    // alone because aborting it cannot stop the server from answering.
+    if (authInFlight.current) return;
+    authInFlight.current = true;
     const form = event.currentTarget,
       values = new FormData(form);
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       const result = await api<{ requires2fa: boolean }>("/api/session", {
         method: "POST",
@@ -232,6 +252,7 @@ export default function Page() {
       if (result.requires2fa) setMfa(true);
       else {
         setMfa(false);
+        setPreviousSession(false);
         receiveTenants(await api<TenantPage>("/api/tenants"));
       }
     } catch (reason) {
@@ -241,6 +262,45 @@ export default function Page() {
           : "Unable to sign in. Try again.",
       );
     } finally {
+      authInFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function signOutPrevious() {
+    if (authInFlight.current) return;
+    authInFlight.current = true;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await api<{ signedOut: boolean; revoked: number }>(
+        "/api/session",
+        { method: "DELETE" },
+      );
+      // The route clears the challenge cookie too, so the 2FA step cannot
+      // continue after a confirmed or unconfirmed attempt.
+      setMfa(false);
+      setPreviousSession(false);
+      setNotice(
+        result.revoked > 0
+          ? "Previous session signed out."
+          : "No stored session was found.",
+      );
+    } catch (reason) {
+      // A 403 guard failure happens before the route clears anything, and a
+      // transport failure or an infrastructure error may also leave cookies in
+      // place. Keep the retry control instead of assuming every HTTP error
+      // cleared the browser's credentials.
+      setError(
+        reason instanceof RequestError
+          ? reason.message
+          : "Sign-out could not be confirmed. Try again.",
+      );
+    } finally {
+      // Release only after the DELETE has settled. A late login cannot overtake
+      // this request, and the guard is never cleared by expiry.
+      authInFlight.current = false;
       setBusy(false);
     }
   }
@@ -281,6 +341,8 @@ export default function Page() {
   }
 
   async function signOut() {
+    if (authInFlight.current) return;
+    authInFlight.current = true;
     query.current?.abort();
     membershipQuery.current?.abort();
     setBusy(true);
@@ -292,6 +354,8 @@ export default function Page() {
         reason instanceof RequestError
           ? reason.message
           : "Sign-out could not be confirmed. Try again.";
+    } finally {
+      authInFlight.current = false;
     }
     choose("");
     setTenants([]);
@@ -314,6 +378,10 @@ export default function Page() {
   const status = error ? (
     <p role="alert" className="notice error">
       {error}
+    </p>
+  ) : notice ? (
+    <p role="status" className="notice">
+      {notice}
     </p>
   ) : null;
   const brand = (
@@ -437,6 +505,22 @@ export default function Page() {
                 </button>
               )}
             </form>
+            {previousSession && (
+              <>
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={busy || savingSettings}
+                  onClick={signOutPrevious}
+                >
+                  Sign out previous session
+                </button>
+                <p className="form-note">
+                  If this browser still holds a previous session, sign out
+                  before signing in again so AuthFortress can revoke it.
+                </p>
+              </>
+            )}
             <p className="form-note">
               Your organizations and their observations stay within your
               authorized tenant context.

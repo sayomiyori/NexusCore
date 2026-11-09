@@ -6,6 +6,7 @@ import {
   ApiError,
   challengeCookieName,
   guard,
+  refreshCookieName,
   sessionCookieName,
   singleCookie,
 } from "../lib/server.ts";
@@ -39,6 +40,7 @@ test("uses host-prefixed cookies on HTTPS production origins", () => {
   try {
     assert.equal(sessionCookieName(), "__Host-nexus_session");
     assert.equal(challengeCookieName(), "__Host-nexus_challenge");
+    assert.equal(refreshCookieName(), "__Host-nexus_refresh");
     const request = new NextRequest("https://127.0.0.1:3000/api/session", {
       headers: {
         host: "127.0.0.1:3000",
@@ -119,6 +121,44 @@ test("DELETE clears host-prefixed cookies in HTTPS production", async () => {
           value.includes("Secure"),
       ),
     );
+    assert(
+      cookies.some(
+        (value) =>
+          value.startsWith("__Host-nexus_refresh=;") &&
+          value.includes("Secure"),
+      ),
+    );
+  } finally {
+    if (original === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
+    else Object.assign(process.env, { NODE_ENV: original });
+    if (originalOrigin === undefined)
+      Reflect.deleteProperty(process.env, "DASHBOARD_ORIGIN");
+    else Object.assign(process.env, { DASHBOARD_ORIGIN: originalOrigin });
+  }
+});
+
+test("rejects duplicate refresh cookies and clears both prefixed and legacy names", async () => {
+  const original = process.env.NODE_ENV;
+  const originalOrigin = process.env.DASHBOARD_ORIGIN;
+  Object.assign(process.env, {
+    NODE_ENV: "production",
+    DASHBOARD_ORIGIN: "https://127.0.0.1:3000",
+  });
+  try {
+    const request = new NextRequest("https://127.0.0.1:3000/api/session", {
+      method: "DELETE",
+      headers: {
+        host: "127.0.0.1:3000",
+        origin: "https://127.0.0.1:3000",
+        cookie:
+          "__Host-nexus_session=token; __Host-nexus_refresh=one; __Host-nexus_refresh=two; nexus_refresh=legacy",
+      },
+    });
+    const response = await DELETE(request);
+    assert.equal(response.status, 400);
+    const cookies = response.headers.getSetCookie();
+    assert(cookies.some((value) => value.startsWith("__Host-nexus_refresh=;")));
+    assert(cookies.some((value) => value.startsWith("nexus_refresh=;")));
   } finally {
     if (original === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
     else Object.assign(process.env, { NODE_ENV: original });

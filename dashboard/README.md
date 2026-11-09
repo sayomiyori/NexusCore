@@ -113,7 +113,8 @@ Refresh clears the loaded membership pages and selection, then loads the first
 page again. Loading, failed refresh and an empty successful result are distinct.
 Use Refresh to retry a failure. The first returned organization becomes selected;
 load more pages again as needed. At the offset limit the loaded list remains a
-bounded snapshot, not a total count. Session expiry returns to sign-in.
+bounded snapshot, not a total count. Session expiry returns to sign-in, where a
+previous session can still be signed out before signing in again.
 
 Knowledge Base lists tenant-scoped document metadata in pages of 50. A full
 page may be followed by an empty page; records may shift between offset pages
@@ -122,9 +123,18 @@ read. AgentHub requires `PLATFORM_TENANT_ENABLED=true` on the isolated service;
 enabling that feature on an existing deployment is a separate operation. The
 view does not upload, delete, expose file paths or run embeddings.
 - Access and temporary 2FA credentials stay in HttpOnly, SameSite=Strict cookies.
-  The server discards refresh credentials; access cookies expire after 15 minutes.
-  Sign in again when the issuer session expires. Existing issuer rate limits,
-  2FA/backup codes and membership authorization remain authoritative.
+  The issuer refresh credential is kept only in a separate HttpOnly,
+  SameSite=Strict cookie (Secure in production) and is used only for durable
+  sign-out through AuthFortress `/logout/refresh`; it is never exposed to
+  browser JavaScript or returned in JSON/HTML, and it is not used to refresh
+  access. Access cookies still expire after 15 minutes, so sign in again when
+  the access session expires. The sign-in screen reached by an expired session
+  also offers `Sign out previous session`, which revokes the retained refresh
+  credential before a new login overwrites it. Login and sign-out are mutually
+  exclusive in this tab until the DELETE settles; aborting a pending request
+  does not cancel the server response or its cookie clearing, so cross-tab
+  races and unconfirmed issuer failures remain possible. Existing issuer rate
+  limits, 2FA/backup codes and membership authorization remain authoritative.
 - Each Overview request checks current issuer membership before any sink query.
   Every sink request carries that identity and canonical tenant scope. No shared
   user cache, sibling imports, database access or secret-bearing browser config.
@@ -153,9 +163,15 @@ view does not upload, delete, expose file paths or run embeddings.
   older supported observations are not scanned automatically.
 - Organization pages contain up to 50 memberships. Tenant switches clear prior
   observations and abort stale reads. Logout clears cookies and requests issuer
-  revocation; failures say when issuer sign-out could not be confirmed.
+  revocation with the access and/or refresh credential; failures say when issuer
+  sign-out could not be confirmed. The expired-session sign-in screen exposes the
+  same action: a confirmed 200 reports how many distinct credentials were
+  revoked, and zero means no cookie was presented, so the UI says no stored
+  session was found instead of claiming issuer revocation. A 403 guard failure
+  or an uncertain network failure leaves the control available to retry; only
+  a 200 response ends the retry window.
 
-No user registration, OAuth, session refresh workflow, bot editing or deactivation, processing activation, billing, Telegram alerts,
+No user registration, OAuth, automatic session refresh workflow, bot editing or deactivation, processing activation, billing, Telegram alerts,
 public deployment or main-stack activation in this increment.
 
 Contract: [dashboard-overview.md](../specs/dashboard-overview.md).

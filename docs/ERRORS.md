@@ -1,5 +1,39 @@
 # Verification tooling errors
 
+## 2026-11-09: Expired-session login screen hid durable sign-out
+
+- Symptom: after the access cookie expired, the dashboard returned to a login
+  screen with no sign-out action. The retained 30-day refresh cookie could not be
+  revoked, and signing in again overwrote it.
+- Cause: `DELETE /api/session` was wired only to the workspace sidebar. Both the
+  initial membership 401 and `expire()` moved to a login branch without that
+  control.
+- Fix: the login screen offers `Sign out previous session` through the same
+  same-origin DELETE. A confirmed 200 now includes the revoked credential count;
+  zero is reported as no stored session rather than issuer revocation. The
+  unconfirmed 502 copy is unchanged. Login and both sign-out actions share a
+  synchronous same-tab in-flight guard that is held until the DELETE settles; a
+  pending sign-out is not aborted by expiry or by a login attempt, because
+  aborting the client request cannot cancel the server-side response or the
+  `Set-Cookie` clearing it carries. A 403 guard failure or an uncertain network
+  failure keeps the retry control instead of assuming cookies were cleared.
+- Detection: route regressions cover revoked counts 0/1/2/4 and assert a 403
+  guard failure returns no `Set-Cookie`, alongside the existing unconfirmed,
+  duplicate-cookie and Host/Origin cases. Isolated headless Chromium acceptance
+  used a synthetic loopback issuer: expiring only the access cookie followed by
+  reload exposed the control, made exactly one refresh-only logout call, showed
+  the confirmed copy and left no auth cookies. A no-cookie visit made zero issuer
+  calls and showed the no-session copy; issuer 503 showed the unconfirmed copy
+  with the retry control still present. With a delayed 204, two synchronous
+  clicks produced one DELETE, a login submit during the pending request made zero
+  issuer login calls, the delayed response still produced the confirmed notice
+  after it settled, and login worked only after settlement. An issuer timeout
+  produced the unconfirmed copy with the retry control available; retrying then
+  reported no stored session. The 360px control stayed visible and
+  keyboard-focusable with no horizontal overflow, console errors or page errors.
+  The browser run proves same-tab behavior only; a cross-tab late response is not
+  simulated.
+
 ## 2026-11-08: Logout reported success when the issuer rejected the token
 
 - Symptom: `DELETE /api/session` returned `200 {"signedOut":true}` although the

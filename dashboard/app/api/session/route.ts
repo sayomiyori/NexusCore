@@ -11,6 +11,8 @@ import {
   guard,
   origin,
   record,
+  refreshCookieMaxAge,
+  refreshCookieName,
   reply,
   requestJson,
   sessionCookieName,
@@ -66,13 +68,19 @@ export async function POST(request: NextRequest) {
     );
     if (result.requires_2fa === true) {
       const response = reply({ requires2fa: true });
-      cookie(response, sessionCookieName(), "", 0);
+      clearAccessCookies(response);
+      clearRefreshCookies(response);
       cookie(response, challengeCookieName(), bearer(result.temp_token), 300);
       return response;
     }
     if (result.token_type !== "bearer") throw new ApiError(502);
+    // Validate both issuer credentials before setting either cookie. A partial
+    // response must not leave a mixed access/refresh pair in the browser.
+    const access = bearer(result.access_token);
+    const refresh = bearer(result.refresh_token);
     const response = reply({ requires2fa: false });
-    cookie(response, sessionCookieName(), bearer(result.access_token), 900);
+    cookie(response, sessionCookieName(), access, 900);
+    cookie(response, refreshCookieName(), refresh, refreshCookieMaxAge);
     cookie(response, challengeCookieName(), "", 0);
     return response;
   } catch (error) {
@@ -80,11 +88,33 @@ export async function POST(request: NextRequest) {
   }
 }
 
+function clearAccessCookies(response: NextResponse): void {
+  for (const name of ["__Host-nexus_session", "nexus_session"])
+    cookie(response, name, "", 0);
+}
+
+function clearRefreshCookies(response: NextResponse): void {
+  for (const name of ["__Host-nexus_refresh", "nexus_refresh"])
+    cookie(response, name, "", 0);
+}
+
 function clearSessionCookies(response: NextResponse): void {
-  for (const name of new Set([sessionCookieName(), "nexus_session"]))
+  clearAccessCookies(response);
+  for (const name of ["__Host-nexus_challenge", "nexus_challenge"])
     cookie(response, name, "", 0);
-  for (const name of new Set([challengeCookieName(), "nexus_challenge"]))
-    cookie(response, name, "", 0);
+  clearRefreshCookies(response);
+}
+
+function presentedCredentials(
+  request: NextRequest,
+  names: Iterable<string>,
+): string[] {
+  const values = new Set<string>();
+  for (const name of new Set(names)) {
+    const value = singleCookie(request, name);
+    if (value) values.add(value);
+  }
+  return [...values];
 }
 
 export async function DELETE(request: NextRequest) {
@@ -93,35 +123,65 @@ export async function DELETE(request: NextRequest) {
   } catch (error) {
     return failure(error);
   }
-  let failed = false;
-  let token: string | undefined;
+  let access: string[], refresh: string[];
   try {
-    token = singleCookie(request, sessionCookieName());
+    access = presentedCredentials(request, [
+      "__Host-nexus_session",
+      "nexus_session",
+    ]);
+    refresh = presentedCredentials(request, [
+      "__Host-nexus_refresh",
+      "nexus_refresh",
+    ]);
   } catch (error) {
     const response = failure(error);
     clearSessionCookies(response);
     return response;
   }
-  if (token) {
+  let failed = false;
+  // Access logout first: AuthFortress authenticates it against the live session.
+  // Revoking through the refresh credential first would make a matched access
+  // call return 401 and turn a normal logout into a false unconfirmed result.
+  for (const credential of access) {
     try {
       await requestJson(
         origin("AUTH"),
         "/api/v1/auth/logout",
-        bearer(token),
+        bearer(credential),
         undefined,
         {},
+        undefined,
+        204,
       );
     } catch {
       failed = true;
     }
   }
+  for (const credential of refresh) {
+    try {
+      await requestJson(
+        origin("AUTH"),
+        "/api/v1/auth/logout/refresh",
+        undefined,
+        undefined,
+        { refresh_token: bearer(credential) },
+        undefined,
+        204,
+      );
+    } catch {
+      failed = true;
+    }
+  }
+  // Count distinct presented credentials so the client can distinguish a
+  // confirmed issuer revocation from a local-only clear with no cookie.
+  const revoked = access.length + refresh.length;
   const response = reply(
     failed
       ? {
           error:
             "Local session cleared; issuer sign-out could not be confirmed.",
         }
-      : { signedOut: true },
+      : { signedOut: true, revoked },
     failed ? 502 : 200,
   );
   clearSessionCookies(response);
