@@ -30,7 +30,7 @@ import Organizations from "./organizations.tsx";
 import Usage from "./usage.tsx";
 
 type TenantPage = { items: Tenant[]; hasMore: boolean; offset: number };
-type BotView = "bots" | "usage" | "configuration";
+type BotView = "bots" | "usage" | "jobs" | "configuration";
 type SettingsTarget = "tenant" | "bot";
 type Selection = {
   tenant: string;
@@ -861,9 +861,19 @@ export default function Page() {
           {data && "items" in data && selection.view === "jobs" && (
             <Jobs
               data={data}
-              canFirst={Boolean(selection.cursor)}
-              onFirst={() => choose(selected, "jobs")}
-              onNext={() => choose(selected, "jobs", data.nextCursor)}
+              canFirst={canGoFirst(botPages)}
+              canPrevious={canGoPrevious(botPages)}
+              onFirst={() => pageBots({ kind: "first" }, "jobs")}
+              onPrevious={() =>
+                pageBots(
+                  { kind: "previous", cursor: previousCursor(botPages) },
+                  "jobs",
+                )
+              }
+              onNext={() =>
+                data.nextCursor &&
+                pageBots({ kind: "next", cursor: data.nextCursor }, "jobs")
+              }
               onExpired={expire}
             />
           )}
