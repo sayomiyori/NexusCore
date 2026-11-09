@@ -64,7 +64,7 @@ keep AI processing, real credentials and workers disabled. Setting a dashboard
 origin does not activate a backend feature.
 
 AI jobs uses the same active-bot selector with an explicit Load jobs action.
-First bot page/Next bot page select a bot inventory page; First job page/Next
+First/Previous/Next bot page select a bot inventory page; First/Previous/Next
 job page navigate its stored job metadata separately. A full 50-job page can
 be the final page, following AgentHub's existing cursor contract. Only job/event
 IDs, known states, recorded attempts and UTC timestamps are shown. Bot, scope,
