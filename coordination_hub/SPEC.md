@@ -10,11 +10,15 @@ Hub runs fixed read-only Git commands; it does not commit, merge, push, run arbi
 
 ## Repositories and worktrees
 
-Two repository ids are configured for MCP use: `nexuscore` (`D:/Programming/NexusCore`) and `authfortress` (`D:/Programming/AuthFortress`). The store still namespaces leases for six repositories, but only a configured repository can produce verified review evidence.
+Three repository ids are configured for MCP use: `nexuscore` (`D:/Programming/NexusCore`), `authfortress` (`D:/Programming/AuthFortress`) and `webhook_manager` (`D:/Programming/WebHook_Manager`). The store still namespaces leases for six repositories, but only a configured repository can produce verified review evidence. Configuring an id registers nothing: `webhook_manager` has no `.worktrees/<agent>` checkout yet, so every repository-qualified reservation and submission there fails closed until a worktree of that repository exists on `refs/heads/agent/<agent>`. Hub never creates a worktree.
 
 Reservations and review are repository-qualified. `lock_files` and `get_file_owners` take `repository` and default to `nexuscore`; `lock_files` requires the calling agent's own worktree in that repository. `submit_for_review` verifies the calling agent's worktree of the *submitted* repository. The accepted location is fixed by convention, `<root>/.worktrees/<agent>` on branch `refs/heads/agent/<agent>`; the main checkout, a foreign path, an unregistered worktree, another branch, a linked or reparse-point path, a dirty tree or a revision other than `HEAD` all fail closed. A repository whose worktree does not exist yet is unusable for that agent, and the absence of another agent's worktree never blocks the calling agent's lease. Hub never creates a worktree of another repository.
 
 Repository worktrees for AuthFortress were registered from `main@116ffdb8`. The original dirty AuthFortress main checkout is preserved and still visible; only the new `.worktrees/` directory is excluded locally through `.git/info/exclude`, not a tracked ignore file.
+
+## Activation
+
+This source is not the server that is running. The Hub that is currently running is the older detached build at `D:/Programming/NexusCore/.worktrees/coordination-hub`; its `lock_files` and `get_file_owners` schemas expose no `repository` parameter, and a `repository` argument sent to it is silently ignored rather than rejected, so the call reports the default `nexuscore` namespace. Adding `webhook_manager` to the allowlist therefore activates nothing: no running server, profile, client or database changes, and a WebHook_Manager reservation through the running Hub is neither possible nor safe. A client may rely on repository-qualified reservations only after it has confirmed that the connected server advertises `repository` on `lock_files` and `get_file_owners`; until then, treat sibling repositories as unsupported and do not pass a repository argument to the running Hub. The silent-ignore behaviour is limited to those two tools: `submit_for_review` requires `repository`, so an omitted or substituted argument is rejected rather than defaulted to `nexuscore`.
 
 ## Task-local configuration
 

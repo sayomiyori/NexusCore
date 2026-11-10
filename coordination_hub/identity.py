@@ -9,9 +9,12 @@ from pathlib import Path
 BRANCHES = {'security': 'agent/security', 'development': 'agent/development', 'codex': 'agent/codex'}
 # Repository ids exposed over MCP. Keys must stay in sync with store.REPOSITORIES;
 # a repository with no configured root can never produce verified review evidence.
+# Adding an id here only allowlists its fixed root: it registers no worktree and
+# activates nothing until <root>/.worktrees/<agent> exists on the agent branch.
 REPOSITORY_ROOTS = {
     'nexuscore': Path('D:/Programming/NexusCore'),
     'authfortress': Path('D:/Programming/AuthFortress'),
+    'webhook_manager': Path('D:/Programming/WebHook_Manager'),
 }
 GIT = Path('C:/Program Files/Git/cmd/git.exe')
 

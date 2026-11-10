@@ -1,6 +1,6 @@
-# Coordination Hub repository-qualified reservations and review (candidate)
+# Coordination Hub repository-qualified reservations and review
 
-Status: candidate patch, uncommitted, in `D:/Programming/NexusCore/.worktrees/development` on branch `agent/development`. The running Hub, the live database and the global OpenCode profiles are unchanged.
+Status: implemented and reviewed for the NexusCore and AuthFortress scope. Amended 2026-11-10 to allowlist `webhook_manager` in the source; see [the amendment](#amendment-2026-11-10-webhook_manager-allowlist-source-only). The running Hub is still the older build, so that entry activates nothing.
 
 ## Why
 
@@ -36,7 +36,7 @@ Baseline copied byte for byte from the read-only foreign implementation at `D:/P
 
 `identity.py`
 
-- Adds `REPOSITORY_ROOTS` with exactly two allowlisted roots: `nexuscore` at `D:/Programming/NexusCore` and `authfortress` at `D:/Programming/AuthFortress`. No caller-supplied root is accepted.
+- Adds `REPOSITORY_ROOTS` with exactly three allowlisted roots: `nexuscore` at `D:/Programming/NexusCore`, `authfortress` at `D:/Programming/AuthFortress` and `webhook_manager` at `D:/Programming/WebHook_Manager` (the last added on 2026-11-10, see the amendment). No caller-supplied root is accepted.
 - Adds `repository_root()` and `worktree_for()`. The only accepted worktree is `<root>/.worktrees/<agent>` on `refs/heads/agent/<agent>`.
 - `verify_worktree()` now checks the repository, rejects a root that is not that repository's fixed root, and keeps rejecting the main checkout, foreign paths, unregistered worktrees, wrong or detached branches, links, reparse points and hard links. It validates the configured path as stored before resolving it, and matches other agents' registry entries by name only so a stale entry cannot abort the caller.
 - `verify_revision()` rejects a repository that is not allowlisted and verifies the worktree of the submitted repository.
@@ -183,9 +183,84 @@ AuthFortress leases belongs to the security task, not to this candidate.
 development-only smoke artifact pointing at a temporary database. It is not the
 live wiring, and no live-pointing profile was created.
 
+## Amendment 2026-11-10: `webhook_manager` allowlist (source only)
+
+`identity.py` now allowlists a third repository id, `webhook_manager` at
+`D:/Programming/WebHook_Manager`. No other Hub behaviour changed: the store
+already namespaced `webhook_manager` leases, and `server.py` already rejects any
+repository id absent from the allowlist, so no server, store, schema or database
+change was needed, and there is no migration.
+
+Nothing is activated:
+
+- The running Hub is the old detached build at
+  `D:/Programming/NexusCore/.worktrees/coordination-hub` (`ba2ca02`). Its
+  `lock_files(request_id, task_id, paths, ttl)` and `get_file_owners(paths)` take
+  no `repository` parameter, which matches the tool schemas advertised to the live
+  development session used for this amendment. A `repository` value sent to that
+  build is ignored rather than rejected (an observed live call returned the
+  default `nexuscore` namespace, not an error), so it cannot select a namespace.
+  Adding the allowlist entry therefore changes no running server, profile, client
+  or database, and does not make a WebHook_Manager reservation possible or safe.
+- `D:/Programming/WebHook_Manager` has no `.worktrees/<agent>` registration.
+  Repository-qualified reservations and submissions there fail closed until a
+  worktree of that repository exists on `refs/heads/agent/<agent>`. Hub never
+  creates a worktree.
+- The WebHook_Manager checkout at `main@405bf99` and its uncommitted work are not
+  touched: no file, worktree, branch, stash, profile or ignore file was created,
+  edited or removed there.
+- The five NexusCore paths touched by this amendment were leased through the
+  running Hub in the default `nexuscore` namespace before editing.
+
+A client may rely on repository-qualified reservations only after confirming that
+the connected server advertises `repository` on `lock_files` and
+`get_file_owners`.
+
+### Evidence
+
+Run from `D:/Programming/NexusCore/.worktrees/development` with the Hub
+interpreter `C:/Python314/python.exe`:
+
+```powershell
+C:/Python314/python.exe -B -m unittest discover -s tests/coordination -p "test_*.py"
+# Ran 84 tests in 79.274s
+# OK   (zero skips)
+
+D:/Programming/NexusCore/.venv/tooling-checks/Scripts/python.exe -m ruff check coordination_hub tests/coordination
+# All checks passed!
+
+git diff --check
+# no whitespace errors
+```
+
+The suite grew from 77 to 84 tests. `test_identity.py` pins the three-id
+allowlist, including `webhook_manager` at its fixed root and rejection of the
+namespaced-but-unconfigured `agenthub`, `eventpipe` and `pipewatch`, and verifies a
+disposable `webhook_manager` worktree: the registered `agent/security` worktree
+passes, a missing own worktree fails closed, and a correctly registered worktree
+of another allowlisted repository is not accepted as a substitute.
+
+`test_repository_scope.py` adds a disposable `WebhookManagerScopeTests` class
+(correct worktree/branch/revision passes; missing own worktree, wrong branch and a
+non-WebHook_Manager configured root fail closed) and
+`WebhookManagerMcpTests`, which drives the real `coordination_hub/server.py` over
+stdio with disposable roots, worktree and database:
+
+- `list_tools` on the real server advertises `repository` as an optional string
+  defaulting to `nexuscore` on `lock_files` and `get_file_owners`, and as a
+  required argument of `submit_for_review`.
+- `security` reserves `src/app.py` with `repository='webhook_manager'`; the lease
+  is visible in the `webhook_manager` namespace and invisible in `nexuscore` and
+  `authfortress`.
+- The same lease is verified against the WebHook_Manager worktree and submitted
+  for review; the stored evidence records `repository='webhook_manager'`.
+- Store namespaces without an allowlisted root (`pipewatch`, `agenthub`) are
+  rejected by `lock_files`, and a caller with a missing or wrongly branched
+  WebHook_Manager worktree is refused while its own NexusCore lease still works.
+
 ## Boundaries
 
 - Hub still verifies the configured worktree and branch, not a client's real working directory; reservations remain advisory.
 - The AuthFortress worktrees were registered by the coordinator from `main@116ffdb8`. The original dirty main checkout is preserved and still visible: its five modified files and untracked `.serena` remain. Only the new `/.worktrees/` directory is excluded locally through `.git/info/exclude`; no tracked ignore file was edited.
-- Repository ids without a configured worktree (`webhook_manager`, `agenthub`, `eventpipe`, `pipewatch`) stay in the lease namespace for compatibility but can never produce review evidence.
+- Repository ids without a configured root (`agenthub`, `eventpipe`, `pipewatch`) stay in the lease namespace for compatibility but can never produce review evidence. `webhook_manager` is now configured but has no registered worktree, so it remains unusable for reservations and review until one is registered.
 - No role-to-repository restriction was added; the review evidence records the repository and revision per submission.
