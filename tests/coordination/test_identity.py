@@ -30,20 +30,53 @@ class IdentityTests(unittest.TestCase):
         self.base = Path(temporary.name)
         self.nexuscore = fixtures.GitFixture(self.base / 'nexuscore')
         self.authfortress = fixtures.GitFixture(self.base / 'authfortress')
+        # Only security has a WebHook_Manager worktree, so a missing own worktree
+        # stays observable without touching the real checkout.
+        self.webhook_manager = fixtures.GitFixture(self.base / 'webhook_manager', agents=('security',))
         patcher = patch.dict(self.identity.REPOSITORY_ROOTS, {
             'nexuscore': self.nexuscore.root,
             'authfortress': self.authfortress.root,
+            'webhook_manager': self.webhook_manager.root,
         })
         patcher.start()
         self.addCleanup(patcher.stop)
 
     def test_configured_allowlist_is_fixed(self):
         fresh = load('coordination_identity_defaults', MODULE)
-        self.assertEqual(set(fresh.REPOSITORY_ROOTS), {'nexuscore', 'authfortress'})
+        self.assertEqual(set(fresh.REPOSITORY_ROOTS),
+                         {'nexuscore', 'authfortress', 'webhook_manager'})
         self.assertEqual(fresh.repository_root('nexuscore'), Path('D:/Programming/NexusCore'))
         self.assertEqual(fresh.repository_root('authfortress'), Path('D:/Programming/AuthFortress'))
-        with self.assertRaises(fresh.IdentityError):
-            fresh.repository_root('agenthub')
+        self.assertEqual(fresh.repository_root('webhook_manager'),
+                         Path('D:/Programming/WebHook_Manager'))
+        # Namespaced in the store but deliberately absent from the fixed allowlist.
+        for unsupported in ('agenthub', 'eventpipe', 'pipewatch', 'NexusCore', ''):
+            with self.assertRaises(fresh.IdentityError):
+                fresh.repository_root(unsupported)
+
+    def test_webhook_manager_worktree_is_repository_qualified(self):
+        root = self.webhook_manager.root
+        self.assertEqual(self.identity.worktree_for('webhook_manager', 'security'),
+                         root / '.worktrees/security')
+        self.identity.verify_reservation_scope('security', 'webhook_manager')
+        self.identity.verify_submission('security', 'webhook_manager',
+                                        self.webhook_manager.revision)
+        # An agent with no WebHook_Manager worktree fails closed; another agent's
+        # absence is not tolerated for the caller itself.
+        self.assertFalse((root / '.worktrees/development').exists())
+        with self.assertRaises(self.identity.IdentityError):
+            self.identity.verify_reservation_scope('development', 'webhook_manager')
+        with self.assertRaises(self.identity.IdentityError):
+            self.identity.verify_submission('development', 'webhook_manager',
+                                            self.webhook_manager.revision)
+        # A worktree registered for another allowlisted repository is no substitute.
+        with self.assertRaises(self.identity.IdentityError):
+            self.identity.verify_worktree(self.nexuscore.root, 'security',
+                                          self.nexuscore.worktree('security'), 'webhook_manager')
+        with self.assertRaises(self.identity.IdentityError):
+            self.identity.verify_revision(self.nexuscore.root, 'security',
+                                          self.nexuscore.worktree('security'),
+                                          'webhook_manager', self.webhook_manager.revision)
 
     def test_revision_must_match_checked_out_clean_worktree(self):
         auth_root = self.authfortress.root
