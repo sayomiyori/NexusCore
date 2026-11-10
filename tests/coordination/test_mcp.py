@@ -33,11 +33,16 @@ class MCPContractTests(unittest.TestCase):
         self.base = Path(temporary.name)
         self.nexuscore = module.GitFixture(self.base / 'nexuscore')
         self.authfortress = module.GitFixture(self.base / 'authfortress')
+        # Every allowlisted repository must have a disposable root; the shared
+        # injection refuses to inherit the real WebHook_Manager checkout.
+        self.webhook_manager = module.GitFixture(self.base / 'webhook_manager',
+                                                  agents=('security',))
 
     def parameters(self, agent, database, live_root='', worktree=None):
         """stdio server with disposable repository roots injected via runpy."""
         return self.injected(SERVER, agent, database, worktree or self.nexuscore.worktree(agent),
-                             self.nexuscore.root, self.authfortress.root, live_root)
+                             self.nexuscore.root, self.authfortress.root,
+                             self.webhook_manager.root, live_root)
 
     def run_startup(self, agent, database, live_root='', worktree=None, timeout=60):
         """Run the injected server once with a closed stdin and return the process result."""

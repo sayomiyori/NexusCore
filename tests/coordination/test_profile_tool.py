@@ -49,12 +49,17 @@ class ProfileToolTests(unittest.TestCase):
         self.nexuscore = self.fixtures.GitFixture(self.base / 'repos' / 'nexuscore')
         self.authfortress = self.fixtures.GitFixture(self.base / 'repos' / 'authfortress',
                                                      agents=('security',))
+        # Even unused allowlisted repositories are mapped to disposable roots: the
+        # injection replaces the allowlist instead of inheriting real checkouts.
+        self.webhook_manager = self.fixtures.GitFixture(self.base / 'repos' / 'webhook_manager',
+                                                        agents=('security',))
         # The emitted server is pinned to the selected agent worktree, so each
         # disposable worktree needs its own copy of the Hub package.
         self.install_server(self.nexuscore, 'security', 'development')
         roots = patch.dict('coordination_hub.identity.REPOSITORY_ROOTS', {
             'nexuscore': self.nexuscore.root,
             'authfortress': self.authfortress.root,
+            'webhook_manager': self.webhook_manager.root,
         })
         roots.start()
         self.addCleanup(roots.stop)
@@ -69,7 +74,8 @@ class ProfileToolTests(unittest.TestCase):
 
     def cli(self, *arguments):
         command = self.fixtures.profile_command(TOOL, self.nexuscore.root,
-                                               self.authfortress.root, *arguments)
+                                               self.authfortress.root,
+                                               self.webhook_manager.root, *arguments)
         return subprocess.run([sys.executable, *command],
                               capture_output=True, text=True, timeout=60, check=False)
 
@@ -122,7 +128,7 @@ class ProfileToolTests(unittest.TestCase):
     async def _consume(self, command):
         parameters = self.fixtures.injected_parameters(
             command[1], command[2], command[3], command[4],
-            self.nexuscore.root, self.authfortress.root)
+            self.nexuscore.root, self.authfortress.root, self.webhook_manager.root)
         async with stdio_client(parameters) as (read, write), \
                 ClientSession(read, write) as session:
             await session.initialize()

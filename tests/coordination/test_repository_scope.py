@@ -5,8 +5,10 @@ temporary directory. No configured repository, live database or production
 service is read or written.
 """
 import asyncio
+import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -22,21 +24,7 @@ PACKAGE = Path(__file__).resolve().parents[2] / 'coordination_hub'
 IDENTITY = PACKAGE / 'identity.py'
 SERVER = PACKAGE / 'server.py'
 STORE = PACKAGE / 'store.py'
-
-# Runs the real server in a child process with disposable repository roots. The
-# production allowlist in identity.py stays fixed; only this process's mapping is
-# replaced, exactly like the shared test fixture injection.
-SERVER_INJECTION = '''import runpy, sys
-from pathlib import Path
-server, agent, database, worktree, nexuscore, authfortress, webhook_manager = sys.argv[1:8]
-sys.path.insert(0, str(Path(server).parent))
-import identity
-identity.REPOSITORY_ROOTS['nexuscore'] = Path(nexuscore)
-identity.REPOSITORY_ROOTS['authfortress'] = Path(authfortress)
-identity.REPOSITORY_ROOTS['webhook_manager'] = Path(webhook_manager)
-sys.argv = [server, agent, database, worktree]
-runpy.run_path(server, run_name='__main__')
-'''
+TOOL = PACKAGE / 'profile_tool.py'
 
 
 def _fixture():
@@ -238,13 +226,9 @@ class WebhookManagerMcpTests(unittest.TestCase):
                                                        agents=('security', 'codex'))
 
     def parameters(self, agent):
-        from mcp import StdioServerParameters
-        roots = [str(self.nexuscore.root), str(self.authfortress.root),
-                 str(self.webhook_manager.root)]
-        return StdioServerParameters(
-            command=sys.executable,
-            args=['-B', '-c', SERVER_INJECTION, str(SERVER), agent, self.database,
-                  str(self.nexuscore.worktree(agent)), *roots])
+        return self.fixture.injected_parameters(
+            SERVER, agent, self.database, self.nexuscore.worktree(agent),
+            self.nexuscore.root, self.authfortress.root, self.webhook_manager.root)
 
     def test_actual_schema_and_webhook_manager_leases_are_namespaced(self):
         self.assertTrue(SERVER.exists(), 'MCP server must exist')
@@ -349,6 +333,132 @@ class WebhookManagerMcpTests(unittest.TestCase):
                         'paths': ['src/control.py'], 'ttl': 60})
                     self.assertFalse(control.isError, control.content)
 
+
+
+class SharedFixtureIsolationTests(unittest.TestCase):
+    """The shared fixture injection must never inherit a production repository root."""
+
+    def setUp(self):
+        self.fixtures = _fixture()
+        self.identity = load('coordination_identity_isolation', IDENTITY)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name)
+
+    def roots(self, **overrides):
+        supplied = {name: str(self.base / name) for name in self.identity.REPOSITORY_ROOTS}
+        supplied.update({name: str(value) for name, value in overrides.items()})
+        return (supplied['nexuscore'], supplied['authfortress'], supplied['webhook_manager'])
+
+    def test_mapping_holds_every_allowlisted_root_and_no_production_default(self):
+        command = self.fixtures.injected_command(
+            SERVER, 'codex', self.base / 'hub.sqlite3', self.base / 'worktree', *self.roots())
+        mapping = json.loads(command[-2])
+        self.assertEqual(set(mapping), set(self.identity.REPOSITORY_ROOTS))
+        for name, value in mapping.items():
+            self.assertEqual(Path(value), self.base / name)
+            self.assertNotEqual(Path(value), self.identity.REPOSITORY_ROOTS[name])
+
+    def test_an_omitted_root_is_rejected_before_the_server_reads_anything(self):
+        for missing in ('', None, '   '):
+            with self.subTest(root=missing), self.assertRaises(ValueError):
+                self.fixtures.injected_command(
+                    SERVER, 'codex', self.base / 'hub.sqlite3', self.base / 'worktree',
+                    str(self.base / 'nexuscore'), str(self.base / 'authfortress'), missing)
+        # The child process refuses an incomplete mapping instead of falling back to
+        # the production root of the repository the caller left out.
+        incomplete = json.dumps({'nexuscore': str(self.base / 'nexuscore'),
+                                 'authfortress': str(self.base / 'authfortress')})
+        completed = subprocess.run(
+            [sys.executable, '-B', '-c', self.fixtures.INJECTION, str(SERVER), 'codex',
+             str(self.base / 'hub.sqlite3'), str(self.base / 'worktree'), incomplete, ''],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn('injected roots must cover exactly', completed.stderr)
+        self.assertIn('webhook_manager', completed.stderr)
+        self.assertFalse((self.base / 'hub.sqlite3').exists())
+
+    def test_child_rejects_a_blank_root_before_opening_the_database(self):
+        # Direct JSON bypasses repository_roots, so this exercises the child guard
+        # itself: Path('') silently means the current directory and the mapping
+        # would still cover every allowlisted id.
+        database = self.base / 'hub.sqlite3'
+        for blank in ('', None, '   '):
+            with self.subTest(root=blank):
+                roots = json.dumps({'nexuscore': str(self.base / 'nexuscore'),
+                                    'authfortress': str(self.base / 'authfortress'),
+                                    'webhook_manager': blank})
+                completed = subprocess.run(
+                    [sys.executable, '-B', '-c', self.fixtures.INJECTION, str(SERVER),
+                     'codex', str(database), str(self.base / 'worktree'), roots, ''],
+                    stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                    timeout=60, check=False)
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn('injected roots must be non-blank strings', completed.stderr)
+                self.assertIn('webhook_manager', completed.stderr)
+                self.assertFalse(database.exists())
+
+    def test_profile_child_rejects_a_blank_root_before_running_the_tool(self):
+        # The profile wrapper carries the same guard; Path('') must never reach the
+        # tool, which would otherwise read the current directory as a repository.
+        database = self.base / 'hub.sqlite3'
+        roots = json.dumps({'nexuscore': str(self.base / 'nexuscore'),
+                            'authfortress': str(self.base / 'authfortress'),
+                            'webhook_manager': ''})
+        completed = subprocess.run(
+            [sys.executable, '-B', '-c', self.fixtures.PROFILE_INJECTION, str(TOOL),
+             roots, '--agent', 'development', '--database', str(database)],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertEqual(completed.stdout, '')
+        self.assertIn('injected roots must be non-blank strings', completed.stderr)
+        self.assertIn('webhook_manager', completed.stderr)
+        self.assertFalse(database.exists())
+
+
+    def test_child_rejects_a_relative_root_before_the_server_reads_anything(self):
+        # Path('webhook_manager') would resolve against the child's working
+        # directory, so a relative root is never accepted as a fixture root.
+        database = self.base / 'hub.sqlite3'
+        roots = json.dumps({'nexuscore': 'nexuscore', 'authfortress': 'authfortress',
+                            'webhook_manager': 'webhook_manager'})
+        completed = subprocess.run(
+            [sys.executable, '-B', '-c', self.fixtures.INJECTION, str(SERVER), 'codex',
+             str(database), str(self.base / 'worktree'), roots, ''],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn('injected roots must be absolute paths', completed.stderr)
+        self.assertIn('webhook_manager', completed.stderr)
+        self.assertFalse(database.exists())
+
+    def test_child_rejects_a_production_root_offered_explicitly(self):
+        # Replacing the mapping closes accidental inheritance. A caller could still
+        # name a real checkout on purpose, so the wrapper refuses the production
+        # path of any repository before the server or the tool starts.
+        database = self.base / 'hub.sqlite3'
+        roots = json.dumps({
+            'nexuscore': str(self.base / 'nexuscore'),
+            'authfortress': str(self.base / 'authfortress'),
+            'webhook_manager': str(self.identity.REPOSITORY_ROOTS['webhook_manager'])})
+        for wrapper, target, arguments in (
+                (self.fixtures.INJECTION, str(SERVER),
+                 ['codex', str(database), str(self.base / 'worktree'), roots, '']),
+                (self.fixtures.PROFILE_INJECTION, str(TOOL),
+                 [roots, '--agent', 'development', '--database', str(database)])):
+            with self.subTest(wrapper=target):
+                completed = subprocess.run(
+                    [sys.executable, '-B', '-c', wrapper, target, *arguments],
+                    stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                    timeout=60, check=False)
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn('injected roots must not be production paths', completed.stderr)
+                self.assertIn('webhook_manager', completed.stderr)
+                self.assertFalse(database.exists())
+
+    def test_profile_wrapper_requires_an_explicit_database(self):
+        # The profile tool otherwise defaults to the real live coordination directory.
+        with self.assertRaises(ValueError):
+            self.fixtures.profile_command(TOOL, *self.roots(), '--agent', 'development')
 
 
 class ReviewEvidenceTests(unittest.TestCase):

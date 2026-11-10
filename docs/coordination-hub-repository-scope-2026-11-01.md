@@ -62,16 +62,21 @@ Run from the development worktree root:
 ```powershell
 $env:PYTHONDONTWRITEBYTECODE="1"
 python -B -m unittest discover -s tests/coordination -p "test_*.py"
-# Ran 61 tests ... OK   (zero skips)
+# Ran 91 tests ... OK   (zero skips)
 D:/Programming/NexusCore/.venv/tooling-checks/Scripts/python.exe -m ruff check coordination_hub tests/coordination
 # All checks passed!
 ```
 
 Every identity, repository-scope and full-stdio test uses disposable Git repositories created in a
 temporary directory, with the repository roots injected into the server through
-`runpy`: the wrapper patches `identity.REPOSITORY_ROOTS` and then runs the real
-`server.py`, so the production allowlist stays fixed and nothing is
-environment-configurable. Three startup and rejection tests
+`runpy`: the wrapper replaces `identity.REPOSITORY_ROOTS` with an explicit mapping that must cover
+exactly the allowlisted ids and then runs the real `server.py`, so the production allowlist stays
+fixed and nothing is environment-configurable. The mapping is replaced rather than patched, and the
+wrapper refuses to start the server for an incomplete mapping, a blank root, or a repository's
+production path — the shared fixture used to leave `webhook_manager` pointing at
+`D:/Programming/WebHook_Manager`, so a WebHook reservation could have verified the real checkout.
+`SharedFixtureIsolationTests` covers each of those guards, including the profile wrapper.
+Three startup and rejection tests
 (`test_provisioned_live_database_starts`,
 `test_live_database_missing_does_not_get_created`,
 `test_rejects_wrong_worktree_before_database_creation`) still pass the literal
