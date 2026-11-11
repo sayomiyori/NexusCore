@@ -60,6 +60,9 @@ authorized flags (`PLATFORM_TELEGRAM_ENABLED`, `TELEGRAM_AI_ENABLED`,
 `TELEGRAM_REPLIES_ENABLED` plus provider credentials). This spec never enables
 them; it points the user at the existing AI jobs, Events and Usage sections
 where the first reply appears as safe metadata once processing is activated.
+Those read sections keep their own existing opt-in service flags (for example
+`PLATFORM_READ_ENABLED` for AgentHub reads); fixture acceptance enables them
+only inside the fixture and never on an existing stand.
 
 ## Roles
 
@@ -198,7 +201,10 @@ routes.
   [auth-session-hardening.md](auth-session-hardening.md) and
   [dashboard-overview.md](dashboard-overview.md): HttpOnly SameSite=Strict
   cookies, 15-minute access expiry, no automatic refresh, durable sign-out
-  through the retained refresh credential.
+  through the retained refresh credential. Dashboard cookie-path PR #19 was
+  still open for independent review when this spec was written; it narrows
+  legacy-path cookie clearing only and does not alter these contracts. Slice
+  branches rebase on main after it merges and rerun the session suites.
 
 ## Idempotency and uncertain outcomes
 
@@ -330,8 +336,9 @@ Telegram, LLM or provider call; no main-stand mutation; no live first reply.
 
 Each slice ships the full command list green, its focused suites, isolated
 fixture evidence and a fresh independent adversarial/security review before
-merge. No slice touches a sibling repository, the root Compose file or any
-existing stand.
+merge, and confirms the repository's existing dashboard GitHub checks passing
+on the pushed branch on both Windows and Ubuntu. No slice touches a sibling
+repository, the root Compose file or any existing stand.
 
 ## Out of scope
 
