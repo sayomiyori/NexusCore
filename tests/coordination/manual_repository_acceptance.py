@@ -44,10 +44,14 @@ async def run():
     nexuscore = fixtures.GitFixture(base / 'nexuscore')
     # Only security has an AuthFortress worktree, which mirrors the real registration.
     authfortress = fixtures.GitFixture(base / 'authfortress', agents=('security',))
+    # Every allowlisted repository is mapped to a disposable root, so this harness
+    # never reads the real WebHook_Manager checkout.
+    webhook_manager = fixtures.GitFixture(base / 'webhook_manager', agents=('security',))
 
     def parameters(agent):
         return fixtures.injected_parameters(SERVER, agent, database, nexuscore.worktree(agent),
-                                            nexuscore.root, authfortress.root)
+                                            nexuscore.root, authfortress.root,
+                                            webhook_manager.root)
 
     async with stdio_client(parameters('codex')) as (r1, w1):  # noqa: SIM117
         async with stdio_client(parameters('security')) as (r2, w2):
