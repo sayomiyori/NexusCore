@@ -27,7 +27,11 @@ supported topology: `privateOrigin` only accepts numeric loopback origins and
 before it becomes active. `singleCookie` rejects duplicate cookie names before
 the last-wins parser can select a shadowing value, including on DELETE, which
 returns a bounded 400 and clears both cookie generations. This reduces cookie
-tossing to a bounded failure rather than a session swap.
+tossing to a bounded failure rather than a session swap. Sign-out also clears
+the legacy names at `Path=/api`, the only non-root scope the BFF serves, so a
+same-host cookie planted there does not need manual deletion. A legacy cookie
+planted at any other non-root path still requires manual clearing; `__Host-`
+prefix rules forbid setting those names outside `Path=/`.
 
 ## Root required credentials and privileges
 
@@ -70,12 +74,15 @@ The AuthFortress, WebHook and AgentHub API services run with
   credentials (PostgreSQL superuser, service DB and Redis passwords, auth and
   webhook secret keys) are supplied (intended fail-closed behavior).
 - Dashboard `tests/cookie-hardening.test.ts` checks `__Host-` names, duplicate
-  rejection (dev and production DELETE), guard acceptance/rejection and the
-  single-cookie path. `tests/routes.test.ts` pins both production paths: an
-  HTTPS origin emits `__Host-nexus_session` (Secure/HttpOnly/SameSite=strict,
-  Path=/, no Domain), and an HTTP loopback origin keeps `nexus_session` while
-  still emitting `Secure`. That second assertion is what stops `Secure` from
-  silently re-coupling to the HTTPS gate.
+  rejection (dev and production DELETE), guard acceptance/rejection, the
+  single-cookie path and the `Path=/api` legacy clearing headers.
+  `tests/routes.test.ts` pins both production paths: an HTTPS origin emits
+  `__Host-nexus_session` (Secure/HttpOnly/SameSite=strict, Path=/, no Domain),
+  and an HTTP loopback origin keeps `nexus_session` while still emitting
+  `Secure`. That second assertion is what stops `Secure` from silently
+  re-coupling to the HTTPS gate. It also pins the HTTPS 2FA response:
+  `__Host-nexus_challenge` with `Max-Age=300` and the `__Host-nexus_session`
+  clearing header.
 - Full stack/browser acceptance (live `nexus_net` edge, real client keys,
   browser login) was not run in this increment. The `__Host-` branch stays
   dormant until an HTTPS origin exists, so no browser flow exercises it.

@@ -243,3 +243,26 @@ This closes the shipped edge-driver gap; the HTTPS browser and 2FA test
 residuals in this historical receipt are unchanged. A later optional negative
 Docker run could not start because the Docker engine had become unavailable;
 no attempt was made to restart the shared engine.
+
+## Cookie residuals follow-up — 2026-11-11 (published as `9b739a3`)
+
+Two residuals from the findings and proposed-test lists are now shipped:
+
+- **Residual 4 (no committed `__Host-` 2FA test)** is closed.
+  `dashboard/tests/routes.test.ts` now runs the password login with
+  `NODE_ENV=production` and `DASHBOARD_ORIGIN=https://127.0.0.1:3000` and
+  asserts the `__Host-nexus_challenge` cookie (Secure, HttpOnly,
+  SameSite=strict, Path=/, Max-Age=300, no Domain), the clearing header
+  `__Host-nexus_session=; Max-Age=0`, and the absence of legacy `nexus_session`.
+- **Residual 2 (a non-root duplicate survives logout)** is narrowed to the
+  manual-clearing case. Sign-out additionally clears the legacy names at
+  `Path=/api`, which is the only non-root scope the BFF serves, so the
+  documented `/api` poisoning recovers without user action. A legacy cookie
+  planted at any other non-root path still needs manual clearing, and
+  `__Host-` names cannot be set outside `Path=/` at all.
+
+Dashboard suite: **132 passed**, Biome 71 files, `tsc --noEmit` clean
+(counts taken on the rebased tree).
+Residuals 1 (no TLS browser check) and 3 (`__Host-` rollout invalidates
+existing sessions) are unchanged: both still require the separately reviewed
+HTTPS-origin deployment.
