@@ -77,4 +77,22 @@ matters.
   settling their uncommitted work in the files that would change.
 - No live-stack recreate, so the new Compose defaults are not yet active in the
   running demo containers.
-- HSTS, digest pinning and worker/datastore limits stay residuals.
+
+Digest pinning and the worker/datastore capability, privilege and PID limits
+were closed by Stage G (`specs/supply-chain-hardening.md`).
+
+## HSTS follow-up — 2026-11-11 (published as `83605dc`)
+
+`dashboard/proxy.ts` now sends `Strict-Transport-Security: max-age=31536000`
+when `NODE_ENV=production` and `DASHBOARD_ORIGIN` starts with `https://` — the
+same predicate that selects the `__Host-` cookie names, moved into
+`dashboard/lib/origin-policy.ts` so both call sites share it. Plain-HTTP
+loopback and development responses omit the header. `includeSubDomains` and
+`preload` are deliberately not set: there is no reviewed domain and both are
+hard to reverse.
+
+`dashboard/tests/security-headers.test.ts` pins both branches. Dashboard suite:
+**132 passed**, Biome 71 files, `tsc --noEmit` clean (counts on the rebased
+tree). The header remains dormant
+until the separately reviewed HTTPS-origin/TLS-proxy deployment, so no browser
+or TLS transport check exists yet.

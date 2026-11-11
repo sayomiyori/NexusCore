@@ -21,6 +21,11 @@ This stage adds the two missing headers to the same middleware:
 - `Cross-Origin-Opener-Policy: same-origin` so the dashboard is isolated from
   cross-origin window handles.
 
+A follow-up (`83605dc`) adds `Strict-Transport-Security: max-age=31536000`
+behind the same production-HTTPS predicate that selects `__Host-` cookie names.
+Plain-HTTP loopback and development responses send no HSTS header, and
+`includeSubDomains`/`preload` stay omitted until a reviewed domain exists.
+
 The production CSP remains strictly nonce-based with `'strict-dynamic'`,
 `base-uri 'none'`, `object-src 'none'`, `form-action 'self'` and
 `frame-ancestors 'none'`; `'unsafe-eval'` is still added only outside production
@@ -52,8 +57,10 @@ They still get the log rotation from the shared logging block.
   `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`,
   `Cache-Control`, and the CSP shape (nonce, `'strict-dynamic'`,
   `frame-ancestors 'none'`, no `unsafe-` in production, `'unsafe-eval'` only in
-  development). `tests/routes.test.ts` keeps its nonce-uniqueness and
-  CSP-propagation assertions.
+  development). It also pins HSTS to the HTTPS production branch and asserts
+  that plain-HTTP loopback and development responses omit it.
+  `tests/routes.test.ts` keeps its nonce-uniqueness and CSP-propagation
+  assertions.
 - `tests/test_verify_runtime_hardening.py` splits `docker-compose.yml` into
   service blocks and asserts the logging anchor on all 15 services, the exact
   content of both anchors, that `<<: *api_hardening` appears on exactly the three
@@ -72,10 +79,13 @@ They still get the log rotation from the shared logging block.
   work in the files that would change (`app/main.py`, `src/api/main.py`,
   `app/api/**`). That change must wait for those trees to settle; blocking it at
   a proxy would only cover the Telegram edge, not the loopback ports.
-- HSTS is not set: the supported dashboard origin is plain-HTTP loopback and
-  `__Host-` cookie names are still dormant until an HTTPS origin exists.
-- Workers, PostgreSQL and Redis are not read-only and carry no PID/memory
-  limits beyond the log rotation.
-- Container images remain tag-pinned rather than digest-pinned.
+- HSTS is prepared but dormant: the supported dashboard origin is plain-HTTP
+  loopback, so the header only starts shipping once an HTTPS origin exists.
+  `includeSubDomains` and `preload` are intentionally not set.
+- Workers, PostgreSQL and Redis are not read-only. Stage G
+  (`specs/supply-chain-hardening.md`) adds `cap_drop`, `no-new-privileges` and
+  PID ceilings to workers and datastores, but not memory limits.
+- External images are digest-pinned as of Stage G. Application images built
+  from the sibling build contexts are not pinned because they are local builds.
 - `AgentHub`'s Dockerfile does not set `PYTHONDONTWRITEBYTECODE=1`, so under
   `read_only` every import attempts a `.pyc` write that the interpreter ignores.
