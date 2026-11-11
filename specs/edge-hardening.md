@@ -26,12 +26,22 @@ supported topology: `privateOrigin` only accepts numeric loopback origins and
 `next start` serves plain HTTP, so a TLS proxy/HTTPS-origin change is required
 before it becomes active. `singleCookie` rejects duplicate cookie names before
 the last-wins parser can select a shadowing value, including on DELETE, which
-returns a bounded 400 and clears both cookie generations. This reduces cookie
-tossing to a bounded failure rather than a session swap. Sign-out also clears
-the legacy names at `Path=/api`, the only non-root scope the BFF serves, so a
-same-host cookie planted there does not need manual deletion. A legacy cookie
-planted at any other non-root path still requires manual clearing; `__Host-`
-prefix rules forbid setting those names outside `Path=/`.
+returns a bounded 400. This reduces cookie tossing to a bounded failure rather
+than a session swap. The 400 clears every path scope that can supply a cookie
+for the rejected request: the segment prefixes of its path, with and without a
+trailing slash, plus the root `__Host-` names. Cookie path matching cannot select
+a longer or unrelated path, so no other scope can shadow that request. A cookie
+planted on `/api/tenants`, for example, is removed by the first 400 on that route
+and the retry needs no manual deletion. Sign-out clears the root legacy names and
+`/api`; clearing uses raw `Set-Cookie` headers because the Next response cookie
+store is keyed by name and would keep only the last path for a repeated name.
+A cookie at a path that no API route matches is inert: dashboard pages do not
+read cookies, and only `/api/*` requests reach `singleCookie`. `__Host-` prefix
+rules forbid setting those names outside `Path=/`, so their clearing is root-only.
+A named plain-HTTP host can still receive a domain-scoped legacy duplicate that a
+host-only clearing header cannot remove; the supported numeric-loopback topology
+does not permit `Domain` cookies, and the HTTPS `__Host-` branch removes that
+variant by construction.
 
 ## Root required credentials and privileges
 
@@ -75,7 +85,8 @@ The AuthFortress, WebHook and AgentHub API services run with
   webhook secret keys) are supplied (intended fail-closed behavior).
 - Dashboard `tests/cookie-hardening.test.ts` checks `__Host-` names, duplicate
   rejection (dev and production DELETE), guard acceptance/rejection, the
-  single-cookie path and the `Path=/api` legacy clearing headers.
+  single-cookie path, the root and `Path=/api` legacy clearing headers, and the
+  complete scope set for a duplicate rejected on a nested BFF route.
   `tests/routes.test.ts` pins both production paths: an HTTPS origin emits
   `__Host-nexus_session` (Secure/HttpOnly/SameSite=strict, Path=/, no Domain),
   and an HTTP loopback origin keeps `nexus_session` while still emitting

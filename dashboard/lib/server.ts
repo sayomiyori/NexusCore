@@ -12,6 +12,14 @@ export class ApiError extends Error {
   }
 }
 
+export class DuplicateCookieError extends ApiError {
+  requestPath: string;
+  constructor(path: string) {
+    super(400);
+    this.requestPath = path;
+  }
+}
+
 export function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new ApiError(502);
@@ -124,7 +132,7 @@ export function singleCookie(
   const count = raw
     .split(";")
     .filter((part) => part.trim().startsWith(`${name}=`)).length;
-  if (count > 1) throw new ApiError(400);
+  if (count > 1) throw new DuplicateCookieError(request.nextUrl.pathname);
   return request.cookies.get(name)?.value;
 }
 
@@ -156,7 +164,7 @@ export function reply(data: unknown, status = 200): NextResponse {
 
 export function failure(error: unknown): NextResponse {
   const status = error instanceof ApiError ? error.status : 502;
-  return reply(
+  const response = reply(
     {
       error:
         status === 401
@@ -171,6 +179,9 @@ export function failure(error: unknown): NextResponse {
     },
     status,
   );
+  if (error instanceof DuplicateCookieError)
+    clearDuplicateCookies(response, error.requestPath);
+  return response;
 }
 
 export function cookie(
@@ -187,6 +198,58 @@ export function cookie(
     path,
     maxAge,
   });
+}
+
+// `response.cookies.set` is keyed by name, so it keeps only the last Path for
+// a name. Clearing legacy names at both / and /api needs raw headers; appending
+// them last also keeps them out of that name-keyed store.
+export function clearCookie(
+  response: NextResponse,
+  name: string,
+  path = "/",
+): void {
+  if (!/^\/[\x21-\x7e]*$/.test(path) || /[;,\r\n]/.test(path)) return;
+  response.headers.append(
+    "Set-Cookie",
+    `${name}=; Path=${path}; Max-Age=0; HttpOnly; SameSite=strict${secureCookie() ? "; Secure" : ""}`,
+  );
+}
+
+// A cookie is removed only by a Set-Cookie with the same name and exactly the
+// same Path. Every cookie that can be sent for a request lives on a segment
+// prefix of its path, with or without a trailing slash. Deriving the scopes
+// from the rejected request avoids guessing paths that never reach the BFF.
+export function cookiePathScopes(pathname: string): string[] {
+  const scopes = new Set(["/"]);
+  const segments = pathname.split("/").filter(Boolean);
+  let scope = "";
+  for (const [index, segment] of segments.entries()) {
+    scope += `/${segment}`;
+    scopes.add(scope);
+    if (index < segments.length - 1 || pathname.endsWith("/"))
+      scopes.add(`${scope}/`);
+  }
+  return [...scopes];
+}
+
+const legacyCookieNames = [
+  "nexus_session",
+  "nexus_refresh",
+  "nexus_challenge",
+] as const;
+
+// __Host- cookies are valid only on Path=/, so a non-root scope cannot carry one.
+const hostCookieNames = [
+  "__Host-nexus_session",
+  "__Host-nexus_refresh",
+  "__Host-nexus_challenge",
+] as const;
+
+function clearDuplicateCookies(response: NextResponse, pathname: string): void {
+  for (const name of legacyCookieNames)
+    for (const path of cookiePathScopes(pathname))
+      clearCookie(response, name, path);
+  for (const name of hostCookieNames) clearCookie(response, name);
 }
 
 export async function body(

@@ -6,6 +6,7 @@ import {
   bearer,
   body,
   challengeCookieName,
+  clearCookie,
   cookie,
   failure,
   guard,
@@ -68,9 +69,11 @@ export async function POST(request: NextRequest) {
     );
     if (result.requires_2fa === true) {
       const response = reply({ requires2fa: true });
+      // Set first: `response.cookies.set` rewrites the whole header and would
+      // drop the raw clearing headers appended below.
+      cookie(response, challengeCookieName(), bearer(result.temp_token), 300);
       clearAccessCookies(response);
       clearRefreshCookies(response);
-      cookie(response, challengeCookieName(), bearer(result.temp_token), 300);
       return response;
     }
     if (result.token_type !== "bearer") throw new ApiError(502);
@@ -89,26 +92,27 @@ export async function POST(request: NextRequest) {
 }
 
 // The BFF only ever writes "/", but a same-host actor can plant a legacy
-// cookie on /api and keep every request at the bounded 400. Clearing that
-// second scope on sign-out recovers without manual cookie deletion. __Host-
-// names cannot carry a non-root Path, so only the legacy names are repeated.
+// cookie on /api and keep every request at the bounded 400. Sign-out clears
+// that second scope, and a rejected request clears its own path scopes in
+// `failure`. __Host- names cannot carry a non-root Path, so only the legacy
+// names are repeated.
 function clearAccessCookies(response: NextResponse): void {
   for (const name of ["__Host-nexus_session", "nexus_session"])
-    cookie(response, name, "", 0);
-  cookie(response, "nexus_session", "", 0, "/api");
+    clearCookie(response, name);
+  clearCookie(response, "nexus_session", "/api");
 }
 
 function clearRefreshCookies(response: NextResponse): void {
   for (const name of ["__Host-nexus_refresh", "nexus_refresh"])
-    cookie(response, name, "", 0);
-  cookie(response, "nexus_refresh", "", 0, "/api");
+    clearCookie(response, name);
+  clearCookie(response, "nexus_refresh", "/api");
 }
 
 function clearSessionCookies(response: NextResponse): void {
   clearAccessCookies(response);
   for (const name of ["__Host-nexus_challenge", "nexus_challenge"])
-    cookie(response, name, "", 0);
-  cookie(response, "nexus_challenge", "", 0, "/api");
+    clearCookie(response, name);
+  clearCookie(response, "nexus_challenge", "/api");
   clearRefreshCookies(response);
 }
 
@@ -141,9 +145,8 @@ export async function DELETE(request: NextRequest) {
       "nexus_refresh",
     ]);
   } catch (error) {
-    const response = failure(error);
-    clearSessionCookies(response);
-    return response;
+    // `failure` clears every scope that could have supplied the duplicate.
+    return failure(error);
   }
   let failed = false;
   // Access logout first: AuthFortress authenticates it against the live session.

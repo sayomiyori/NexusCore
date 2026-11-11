@@ -481,7 +481,7 @@ test("logout reports unconfirmed when the presented access credential fails", as
     response.headers
       .getSetCookie()
       .filter((value) => value.includes("Max-Age=0")).length,
-    6,
+    9,
   );
   assert.equal(calls.length, 1);
   assert.equal(calls[0].method, "POST");
@@ -518,7 +518,7 @@ test("logout confirms only when every presented credential returns 204", async (
     response.headers
       .getSetCookie()
       .filter((value) => value.includes("Max-Age=0")).length,
-    6,
+    9,
   );
 });
 
@@ -540,7 +540,7 @@ test("expired access cookie revokes the issuer session with the refresh credenti
     response.headers
       .getSetCookie()
       .filter((value) => value.includes("Max-Age=0")).length,
-    6,
+    9,
   );
 });
 
@@ -582,7 +582,7 @@ test("a failure from either presented credential is unconfirmed without retry", 
     response.headers
       .getSetCookie()
       .filter((value) => value.includes("Max-Age=0")).length,
-    6,
+    9,
   );
 
   calls = [];
@@ -820,7 +820,7 @@ test("absent cookies are local-only success", async () => {
     response.headers
       .getSetCookie()
       .filter((value) => value.includes("Max-Age=0")).length,
-    6,
+    9,
   );
 });
 
@@ -836,8 +836,15 @@ test("duplicate refresh cookies fail locally and clear all cookies", async () =>
   const cleared = response.headers
     .getSetCookie()
     .filter((value) => value.includes("Max-Age=0"));
-  assert.equal(cleared.length, 6);
+  assert.equal(cleared.length, 15);
   assert(cleared.some((value) => value.startsWith("nexus_refresh=;")));
+  assert(
+    cleared.some(
+      (value) =>
+        value.startsWith("nexus_refresh=;") &&
+        value.includes("Path=/api/session"),
+    ),
+  );
 });
 
 test("access failure without a refresh cookie is not retried", async () => {
