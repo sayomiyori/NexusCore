@@ -2,6 +2,7 @@ import http from "node:http";
 import https from "node:https";
 import { isIPv4 } from "node:net";
 import { type NextRequest, NextResponse } from "next/server.js";
+import { httpsOrigin } from "./origin-policy.ts";
 
 export class ApiError extends Error {
   status: number;
@@ -93,13 +94,6 @@ export function bearer(value: unknown): string {
   )
     throw new ApiError(401);
   return value;
-}
-
-function httpsOrigin(): boolean {
-  return (
-    process.env.NODE_ENV === "production" &&
-    (process.env.DASHBOARD_ORIGIN || "").startsWith("https://")
-  );
 }
 
 function secureCookie(): boolean {

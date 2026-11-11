@@ -6,10 +6,14 @@ import { proxy } from "../proxy.ts";
 
 const browser = "http://127.0.0.1:3000";
 const original = process.env.NODE_ENV;
+const originalOrigin = process.env.DASHBOARD_ORIGIN;
 
 afterEach(() => {
   if (original === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
   else Object.assign(process.env, { NODE_ENV: original });
+  if (originalOrigin === undefined)
+    Reflect.deleteProperty(process.env, "DASHBOARD_ORIGIN");
+  else Object.assign(process.env, { DASHBOARD_ORIGIN: originalOrigin });
 });
 
 function request(path = "/"): NextRequest {
@@ -57,6 +61,26 @@ test("the nonce policy is strict in production and relaxed only in dev", () => {
     proxy(request()).headers.get("content-security-policy") || "",
     /'unsafe-eval'/,
   );
+});
+
+test("HSTS is emitted only for an HTTPS production origin", () => {
+  Object.assign(process.env, {
+    NODE_ENV: "production",
+    DASHBOARD_ORIGIN: "https://127.0.0.1:3000",
+  });
+  const secure = proxy(request()).headers.get("strict-transport-security");
+  assert.equal(secure, "max-age=31536000");
+  assert(!(secure || "").includes("includeSubDomains"));
+  assert(!(secure || "").includes("preload"));
+
+  Object.assign(process.env, { DASHBOARD_ORIGIN: browser });
+  assert.equal(proxy(request()).headers.get("strict-transport-security"), null);
+
+  Object.assign(process.env, {
+    NODE_ENV: "development",
+    DASHBOARD_ORIGIN: "https://127.0.0.1:3000",
+  });
+  assert.equal(proxy(request()).headers.get("strict-transport-security"), null);
 });
 
 test("every response carries a fresh nonce", () => {

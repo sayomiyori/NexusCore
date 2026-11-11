@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server.js";
+import { httpsOrigin } from "./lib/origin-policy.ts";
 
 export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
@@ -18,6 +19,12 @@ export function proxy(request: NextRequest) {
   // Older clients ignore CSP frame-ancestors; keep the legacy header too.
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set("Cross-Origin-Opener-Policy", "same-origin");
+  // Only an HTTPS origin can be pinned; a plain-HTTP loopback deployment must
+  // not emit a policy the browser would ignore or that would strand the host.
+  // includeSubDomains/preload are deliberately omitted until a reviewed domain
+  // exists, because both are hard to reverse for sibling hosts.
+  if (httpsOrigin())
+    response.headers.set("Strict-Transport-Security", "max-age=31536000");
   return response;
 }
 
