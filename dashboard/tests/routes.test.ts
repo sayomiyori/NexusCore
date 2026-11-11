@@ -322,6 +322,53 @@ test("production loopback keeps legacy cookie names but still sets Secure", asyn
   }
 });
 
+test("HTTPS production 2FA issues the __Host- challenge and clears the session", async () => {
+  const original = process.env.NODE_ENV;
+  const originalOrigin = process.env.DASHBOARD_ORIGIN;
+  Object.assign(process.env, {
+    NODE_ENV: "production",
+    DASHBOARD_ORIGIN: "https://127.0.0.1:3000",
+  });
+  mfa = true;
+  try {
+    const response = await POST(
+      request(
+        "/api/session",
+        "POST",
+        { email: "test@example.com", password: "synthetic-password" },
+        { origin: "https://127.0.0.1:3000" },
+      ),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { requires2fa: true });
+    const cookies = response.headers.getSetCookie();
+    const challenge = cookies.find((value) =>
+      value.startsWith("__Host-nexus_challenge="),
+    );
+    assert.ok(challenge);
+    assert.match(challenge, /Secure/);
+    assert.match(challenge, /HttpOnly/);
+    assert.match(challenge, /SameSite=strict/);
+    assert.match(challenge, /Path=\//);
+    assert.match(challenge, /Max-Age=300/);
+    assert.match(challenge, /synthetic-challenge/);
+    assert(!challenge.includes("Domain="));
+    for (const prefix of ["__Host-nexus_session=;", "nexus_session=;"]) {
+      const cleared = cookies.find((value) => value.startsWith(prefix));
+      assert.ok(cleared, `${prefix} must be cleared`);
+      assert.match(cleared, /Max-Age=0/);
+    }
+    assert(cookies.some((value) => value.startsWith("__Host-nexus_refresh=;")));
+    assert(!cookies.some((value) => value.includes("synthetic-access")));
+  } finally {
+    if (original === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
+    else Object.assign(process.env, { NODE_ENV: original });
+    if (originalOrigin === undefined)
+      Reflect.deleteProperty(process.env, "DASHBOARD_ORIGIN");
+    else Object.assign(process.env, { DASHBOARD_ORIGIN: originalOrigin });
+  }
+});
+
 test("2FA challenges stay HttpOnly and code exchange uses issuer contract", async () => {
   mfa = true;
   const first = await POST(

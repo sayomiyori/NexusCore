@@ -184,12 +184,13 @@ export function cookie(
   name: string,
   value: string,
   maxAge: number,
+  path = "/",
 ): void {
   response.cookies.set(name, value, {
     httpOnly: true,
     sameSite: "strict",
     secure: secureCookie(),
-    path: "/",
+    path,
     maxAge,
   });
 }

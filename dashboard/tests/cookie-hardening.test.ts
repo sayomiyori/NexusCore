@@ -95,6 +95,42 @@ test("DELETE returns a bounded 400 and clears duplicates", async () => {
   }
 });
 
+test("DELETE also clears a legacy cookie planted on /api", async () => {
+  const originalOrigin = process.env.DASHBOARD_ORIGIN;
+  process.env.DASHBOARD_ORIGIN = browser;
+  try {
+    const request = new NextRequest(`${browser}/api/session`, {
+      method: "DELETE",
+      headers: {
+        host: "127.0.0.1:3000",
+        origin: browser,
+        cookie: "nexus_session=one; nexus_session=two",
+      },
+    });
+    const response = await DELETE(request);
+    assert.equal(response.status, 400);
+    const cookies = response.headers.getSetCookie();
+    assert(
+      cookies.some(
+        (value) =>
+          value.startsWith("nexus_session=;") &&
+          value.includes("Path=/api") &&
+          value.includes("Max-Age=0"),
+      ),
+    );
+    assert(
+      cookies.some(
+        (value) =>
+          value.startsWith("nexus_challenge=;") && value.includes("Path=/api"),
+      ),
+    );
+  } finally {
+    if (originalOrigin === undefined)
+      Reflect.deleteProperty(process.env, "DASHBOARD_ORIGIN");
+    else Object.assign(process.env, { DASHBOARD_ORIGIN: originalOrigin });
+  }
+});
+
 test("DELETE clears host-prefixed cookies in HTTPS production", async () => {
   const original = process.env.NODE_ENV;
   const originalOrigin = process.env.DASHBOARD_ORIGIN;

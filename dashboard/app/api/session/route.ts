@@ -88,20 +88,27 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// The BFF only ever writes "/", but a same-host actor can plant a legacy
+// cookie on /api and keep every request at the bounded 400. Clearing that
+// second scope on sign-out recovers without manual cookie deletion. __Host-
+// names cannot carry a non-root Path, so only the legacy names are repeated.
 function clearAccessCookies(response: NextResponse): void {
   for (const name of ["__Host-nexus_session", "nexus_session"])
     cookie(response, name, "", 0);
+  cookie(response, "nexus_session", "", 0, "/api");
 }
 
 function clearRefreshCookies(response: NextResponse): void {
   for (const name of ["__Host-nexus_refresh", "nexus_refresh"])
     cookie(response, name, "", 0);
+  cookie(response, "nexus_refresh", "", 0, "/api");
 }
 
 function clearSessionCookies(response: NextResponse): void {
   clearAccessCookies(response);
   for (const name of ["__Host-nexus_challenge", "nexus_challenge"])
     cookie(response, name, "", 0);
+  cookie(response, "nexus_challenge", "", 0, "/api");
   clearRefreshCookies(response);
 }
 
