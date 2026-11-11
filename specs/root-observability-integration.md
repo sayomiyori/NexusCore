@@ -5,10 +5,17 @@ Compose or runtime change is part of this file.
 
 Base: `origin/main` at `5cd31467386c5ff5e234fc12e4b7a0818f289c88`.
 
+This is a separately requested roadmap artifact. It does not change the current
+AuthFortress priority in `AGENTS.md`, does not activate any root profile, and does
+not authorize a rollout. Stage 1 and Stage 2 require explicit lead approval and
+their own evidence before any runtime change.
+
 ## Status vocabulary
 
-- **Implemented** — the behaviour exists in a repository and has recorded
-  isolated acceptance. It is not automatically active in the root stack.
+- **Implemented** — the behaviour exists in a repository. It is not automatically
+  active in the root stack.
+- **Verified** — implemented and covered by the recorded isolated acceptance
+  named in this document. This is not root or production verification.
 - **Planned** — agreed design, no implementation in the target repository yet.
 - **Blocked** — cannot be completed without a missing credential, contract or
   decision. Do not present a blocked item as ready.
@@ -16,7 +23,8 @@ Base: `origin/main` at `5cd31467386c5ff5e234fc12e4b7a0818f289c88`.
 Summary:
 
 - Add EventPipe and PipeWatch to the root Compose as two opt-in profiles, with
-  dedicated PostgreSQL/Redis/Kafka/ClickHouse/SeaweedFS instances.
+  dedicated PostgreSQL/Redis/Kafka/ClickHouse/SeaweedFS instances. No profile is
+  enabled by this document.
 - Keep the existing relay as an operator-owned host CLI in Stage 2; do not put a
   human JWT or a DNS-name transport into Compose.
 - Treat the logical envelope and tenant scope as contracts; record that
@@ -28,11 +36,11 @@ Summary:
 
 | Area | State | Evidence |
 | --- | --- | --- |
-| EventPipe platform mode, Kafka/PG/S3 pipeline, DLQ, tenant query API | **Implemented** in the sibling repository; standalone deployment | [EventPipe repository](https://github.com/sayomiyori/EventPipe), `README.md` and `specs/local-hardening.md` there |
-| PipeWatch platform mode, Redis-backed ingest, ClickHouse, alerts | **Implemented** in the sibling repository; standalone deployment | [PipeWatch repository](https://github.com/sayomiyori/PipeWatch), `README.md` and `specs/local-hardening.md` there |
-| Root metadata relay (`scripts/relay_observability.py`) | **Implemented**, opt-in operator CLI, isolated acceptance only | [observability-flow.md](observability-flow.md), [docs/observability-flow.md](../docs/observability-flow.md) |
+| EventPipe platform mode, Kafka/PG/S3 pipeline, DLQ, tenant query API | **Implemented + Verified in isolation** in the sibling repository; standalone deployment | [EventPipe repository](https://github.com/sayomiyori/EventPipe), `README.md` and `specs/local-hardening.md` there |
+| PipeWatch platform mode, Redis-backed ingest, ClickHouse, alerts | **Implemented + Verified in isolation** in the sibling repository; standalone deployment | [PipeWatch repository](https://github.com/sayomiyori/PipeWatch), `README.md` and `specs/local-hardening.md` there |
+| Root metadata relay (`scripts/relay_observability.py`) | **Implemented + Verified in isolation**, opt-in operator CLI | [observability-flow.md](observability-flow.md), [docs/observability-flow.md](../docs/observability-flow.md) |
 | Root Compose with EventPipe/PipeWatch | **Not implemented**. The root starts AuthFortress, WebHook Manager, AgentHub, PostgreSQL and Redis only | [docker-compose.yml](../docker-compose.yml), [README.md](../README.md) |
-| Dashboard Overview/Events reads EventPipe/PipeWatch | **Implemented** as a separate read-only package; not this change | [dashboard-overview.md](dashboard-overview.md), [dashboard-events.md](dashboard-events.md) |
+| Dashboard Overview/Events reads EventPipe/PipeWatch | **Implemented + Verified in isolation** as a separate read-only package; not this change | [dashboard-overview.md](dashboard-overview.md), [dashboard-events.md](dashboard-events.md) |
 | Consumer-side idempotency in EventPipe/PipeWatch | **Not implemented** | See §3.5 |
 | Machine-to-machine tenant credential for the relay | **Blocked** | See §10 |
 | Root activation of EventPipe/PipeWatch/relay | **Planned** | This document |
@@ -57,6 +65,10 @@ dependencies of the current AuthFortress/WebHook/AgentHub startup.
 | --- | --- | --- |
 | `observability-events` | `zookeeper`, `kafka`, `kafka_init`, `eventpipe_postgres`, `seaweedfs`, `seaweedfs_init`, `eventpipe_migrate`, `eventpipe_ingest`, `eventpipe_transform`, `eventpipe_query` | Tenant-scoped event path: REST/gRPC ingest to Kafka, transform to PostgreSQL/S3, query API |
 | `observability-logs` | `pipewatch_clickhouse`, `pipewatch_redis`, `pipewatch` | Tenant-scoped log-record path: durable Redis admission, ClickHouse storage, query/alert API |
+
+Defining both profiles in one Compose file is not activation. Stage 1 starts only
+`observability-events`; Stage 2 adds `observability-logs` after Stage 1 evidence
+is accepted. Neither profile is started by a plain `docker compose up`.
 
 Service contract for the root profiles:
 
@@ -587,8 +599,8 @@ fine"; it starts after the earlier acceptance evidence is recorded.
 
 ### Stage 1 — EventPipe in the root Compose (`observability-events`)
 
-**Status: Planned for the root; EventPipe internals Implemented in the sibling
-repository.**
+**Status: Planned for the root; EventPipe internals Implemented + Verified in
+isolation in the sibling repository.**
 
 Scope:
 
@@ -616,8 +628,8 @@ Exit gate:
 ### Stage 2 — PipeWatch in the root Compose and first relay activation
 (`observability-logs`)
 
-**Status: Planned for the root; PipeWatch and relay internals Implemented in
-isolated acceptance.**
+**Status: Planned for the root; PipeWatch and relay internals Implemented +
+Verified in isolated acceptance.**
 
 Scope:
 
@@ -981,7 +993,10 @@ documented failure, not a false pass.
 3. **Consumer idempotency design (Blocked).** EventPipe needs an optional
    caller-supplied event ID and a unique `(tenant_id, event_id)` constraint;
    PipeWatch needs a dedup key and a ClickHouse strategy (`ReplacingMergeTree`
-   or a Redis claim). Both are sibling changes with separate acceptance.
+   or a Redis claim). Both are sibling changes with separate acceptance. The new
+   fields must be additive: legacy/standalone requests keep the current
+   server-generated IDs and behavior; existing clients are not required to send
+   the logical event ID.
 4. **Retention values (Decision required).** The 7/14/30-day values in §5.4 are
    proposals. Data deletion needs approval, a dry-run and a restore story.
 5. **PipeWatch payload scope (Decision required).** This document limits
