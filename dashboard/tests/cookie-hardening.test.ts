@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { NextRequest } from "next/server.js";
 import { DELETE } from "../app/api/session/route.ts";
+import { GET as tenants } from "../app/api/tenants/route.ts";
 import {
   ApiError,
   challengeCookieName,
+  cookiePathScopes,
   guard,
   refreshCookieName,
   sessionCookieName,
@@ -12,6 +14,15 @@ import {
 } from "../lib/server.ts";
 
 const browser = "http://127.0.0.1:3000";
+
+function cookiePath(value: string): string {
+  const path = value
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("Path="));
+  if (!path) throw new Error(`missing Path in ${value}`);
+  return path;
+}
 
 test("rejects duplicate session cookies", () => {
   const request = new NextRequest(`${browser}/api/session`, {
@@ -167,6 +178,91 @@ test("DELETE clears host-prefixed cookies in HTTPS production", async () => {
   } finally {
     if (original === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
     else Object.assign(process.env, { NODE_ENV: original });
+    if (originalOrigin === undefined)
+      Reflect.deleteProperty(process.env, "DASHBOARD_ORIGIN");
+    else Object.assign(process.env, { DASHBOARD_ORIGIN: originalOrigin });
+  }
+});
+
+test("cookie path scopes cover every scope that can shadow a request", () => {
+  assert.deepEqual(cookiePathScopes("/"), ["/"]);
+  assert.deepEqual(cookiePathScopes("/api"), ["/", "/api"]);
+  assert.deepEqual(cookiePathScopes("/api/session"), [
+    "/",
+    "/api",
+    "/api/",
+    "/api/session",
+  ]);
+  assert.deepEqual(cookiePathScopes("/api/session/"), [
+    "/",
+    "/api",
+    "/api/",
+    "/api/session",
+    "/api/session/",
+  ]);
+});
+
+test("a duplicate on a nested BFF route clears every scope that can shadow it", async () => {
+  const originalOrigin = process.env.DASHBOARD_ORIGIN;
+  process.env.DASHBOARD_ORIGIN = browser;
+  try {
+    const request = new NextRequest(`${browser}/api/tenants`, {
+      headers: {
+        host: "127.0.0.1:3000",
+        cookie: "nexus_session=one; nexus_session=two",
+      },
+    });
+    const response = await tenants(request);
+    assert.equal(response.status, 400);
+    const cookies = response.headers.getSetCookie();
+    const scopes = ["/", "/api", "/api/", "/api/tenants"];
+    assert.equal(cookies.length, 15);
+    for (const name of ["nexus_session", "nexus_refresh", "nexus_challenge"])
+      for (const scope of scopes)
+        assert(
+          cookies.some(
+            (value) =>
+              value.startsWith(`${name}=;`) &&
+              cookiePath(value) === `Path=${scope}`,
+          ),
+          `${name} was not cleared at ${scope}`,
+        );
+    for (const value of cookies) {
+      assert(value.includes("Max-Age=0"));
+      assert(scopes.includes(cookiePath(value).slice("Path=".length)));
+    }
+  } finally {
+    if (originalOrigin === undefined)
+      Reflect.deleteProperty(process.env, "DASHBOARD_ORIGIN");
+    else Object.assign(process.env, { DASHBOARD_ORIGIN: originalOrigin });
+  }
+});
+
+test("successful sign-out emits only the root and /api clearing scopes", async () => {
+  const originalOrigin = process.env.DASHBOARD_ORIGIN;
+  process.env.DASHBOARD_ORIGIN = browser;
+  try {
+    const request = new NextRequest(`${browser}/api/session`, {
+      method: "DELETE",
+      headers: { host: "127.0.0.1:3000", origin: browser, cookie: "" },
+    });
+    const response = await DELETE(request);
+    assert.equal(response.status, 200);
+    const cookies = response.headers.getSetCookie();
+    assert.equal(cookies.length, 9);
+    assert.deepEqual(
+      new Set(cookies.map((value) => cookiePath(value).slice("Path=".length))),
+      new Set(["/", "/api"]),
+    );
+    for (const name of ["nexus_session", "nexus_challenge", "nexus_refresh"])
+      assert(
+        cookies.some(
+          (value) =>
+            value.startsWith(`${name}=;`) && cookiePath(value) === "Path=/",
+        ),
+        `${name} was not cleared at the root`,
+      );
+  } finally {
     if (originalOrigin === undefined)
       Reflect.deleteProperty(process.env, "DASHBOARD_ORIGIN");
     else Object.assign(process.env, { DASHBOARD_ORIGIN: originalOrigin });

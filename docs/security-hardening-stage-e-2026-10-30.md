@@ -266,3 +266,24 @@ Dashboard suite: **132 passed**, Biome 71 files, `tsc --noEmit` clean
 Residuals 1 (no TLS browser check) and 3 (`__Host-` rollout invalidates
 existing sessions) are unchanged: both still require the separately reviewed
 HTTPS-origin deployment.
+
+## Cookie path recovery follow-up — 2026-11-11
+
+Residual 2 is closed for every path an API request can reach. The `/api` clearing
+added above was emitted through `response.cookies.set`, which is keyed by name:
+the later `/api` header replaced the root legacy clear instead of adding to it.
+Clearing now appends raw `Set-Cookie` headers, so a successful sign-out emits the
+root and `/api` generations for all three legacy names (9 headers), and a
+duplicate rejection emits the same plus every segment prefix of the rejected
+request (`/api/`, `/api/tenants`, and so on) for those names, with the three
+`__Host-` names cleared only at the root.
+
+A cookie planted on a nested BFF path is therefore removed by the first bounded
+400 on that route; the retry needs no manual cookie deletion. A cookie at a path
+that no API route matches is inert because pages do not read cookies. Named
+plain-HTTP hosts can still receive a domain-scoped legacy duplicate that a
+host-only clear cannot remove; numeric loopback does not permit `Domain` cookies,
+and HTTPS `__Host-` removes that variant by construction.
+
+Verification: `npm test` **135 passed / 0 failed**, Biome 71 files,
+`tsc --noEmit` clean. No Docker, runtime, real session or provider call was used.
