@@ -85,6 +85,14 @@ AgentHub needs the new `/ai/settings` endpoints and clean migration003_ai_settin
 never migrate the main deployment or merge foreign migration WIP implicitly.
 Bot/page/scope/section/Refresh changes clear loaded settings and local drafts.
 
+Account registration: the sign-in screen offers Create account with email,
+username, password and repeat password. `POST /api/account-registration`
+forwards to AuthFortress `/api/v1/auth/register` with a per-email and a
+per-process limiter; it never signs the account in. Duplicate email is a 409,
+invalid input a 400, and any unconfirmed issuer outcome stays a fixed error.
+No email, username, password or issuer detail is echoed back or logged.
+Tenant creation and webhook setup remain the next onboarding slices.
+
 To check and run the optimized build:
 
 ```powershell
@@ -171,10 +179,11 @@ view does not upload, delete, expose file paths or run embeddings.
   or an uncertain network failure leaves the control available to retry; only
   a 200 response ends the retry window.
 
-No user registration, OAuth, automatic session refresh workflow, bot editing or deactivation, processing activation, billing, Telegram alerts,
+No OAuth, automatic session refresh workflow, bot editing or deactivation, processing activation, billing, Telegram alerts,
 public deployment or main-stack activation in this increment.
 
 Contract: [dashboard-overview.md](../specs/dashboard-overview.md).
+Onboarding contract: [dashboard-public-onboarding.md](../specs/dashboard-public-onboarding.md).
 Bots contract: [dashboard-bots.md](../specs/dashboard-bots.md).
 Events contract: [dashboard-events.md](../specs/dashboard-events.md).
 Usage contract: [dashboard-usage.md](../specs/dashboard-usage.md).

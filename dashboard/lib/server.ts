@@ -173,7 +173,7 @@ export function failure(error: unknown): NextResponse {
             ? "Access denied."
             : status === 429
               ? "Too many attempts. Try again later."
-              : status === 400
+              : status === 400 || status === 422
                 ? "Check the submitted values."
                 : "Data is temporarily unavailable.",
     },
@@ -313,6 +313,7 @@ export function requestJson(
   payload?: unknown,
   method?: "PUT",
   successStatus = 200,
+  statusMap?: Readonly<Record<number, number>>,
 ): Promise<unknown> {
   const target = privateOrigin(base) + path;
   if (!path.startsWith("/api/v1/") || path.includes("#"))
@@ -365,11 +366,13 @@ export function requestJson(
           ) {
             reject(
               new ApiError(
-                status === 422 && successStatus === 200
-                  ? 400
-                  : [400, 401, 403, 404, 409, 429].includes(status)
-                    ? status
-                    : 502,
+                statusMap
+                  ? (statusMap[status] ?? 502)
+                  : status === 422 && successStatus === 200
+                    ? 400
+                    : [400, 401, 403, 404, 409, 429].includes(status)
+                      ? status
+                      : 502,
               ),
             );
             return;
