@@ -22,6 +22,7 @@ import { kindLabels, needsAttention, stateLabels } from "../lib/event-view.ts";
 import type { Overview, Tenant } from "../lib/overview.ts";
 import BotRegistration from "./bot-registration.tsx";
 import BotWebhookPreview from "./bot-webhook-preview.tsx";
+import BotWebhookSetup from "./bot-webhook-setup.tsx";
 import Configuration from "./configuration.tsx";
 import Events from "./events.tsx";
 import Jobs from "./jobs.tsx";
@@ -1171,6 +1172,35 @@ export default function Page() {
                     onExpired={expire}
                   />
                 )}
+                {botPage && (
+                  <section className="panel" aria-label="Onboarding checklist">
+                    <h2>Onboarding checklist</h2>
+                    <ol>
+                      <li>Signed in</li>
+                      <li>
+                        Organization created: {selected ? "done" : "pending"}
+                      </li>
+                      <li>
+                        Active bot registered:{" "}
+                        {botPage.items.some((bot) => bot.active)
+                          ? "done"
+                          : "pending"}
+                      </li>
+                      <li>
+                        Webhook configured:{" "}
+                        {botPage.items.some(
+                          (bot) => bot.webhook === "configured",
+                        )
+                          ? "done"
+                          : "pending"}
+                      </li>
+                      <li>
+                        First reply: pending operator activation of AI
+                        processing.
+                      </li>
+                    </ol>
+                  </section>
+                )}
                 <fieldset className="event-filters">
                   <legend>Search loaded bots</legend>
                   <label>
@@ -1257,12 +1287,21 @@ export default function Page() {
                             </time>
                           </p>
                           {botPage.tenant.role === "owner" && bot.active && (
-                            <BotWebhookPreview
-                              tenant={selected}
-                              bot={bot.id}
-                              disabled={busy || savingSettings}
-                              onExpired={expire}
-                            />
+                            <>
+                              <BotWebhookPreview
+                                tenant={selected}
+                                bot={bot.id}
+                                disabled={busy || savingSettings}
+                                onExpired={expire}
+                              />
+                              <BotWebhookSetup
+                                tenant={selected}
+                                bot={bot.id}
+                                disabled={busy || savingSettings}
+                                onExpired={expire}
+                                onConfigured={() => choose(selected, "bots")}
+                              />
+                            </>
                           )}
                         </div>
                       </li>
