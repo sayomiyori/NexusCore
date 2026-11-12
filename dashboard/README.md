@@ -91,7 +91,12 @@ forwards to AuthFortress `/api/v1/auth/register` with a per-email and a
 per-process limiter; it never signs the account in. Duplicate email is a 409,
 invalid input a 400, and any unconfirmed issuer outcome stays a fixed error.
 No email, username, password or issuer detail is echoed back or logged.
-Tenant creation and webhook setup remain the next onboarding slices.
+Tenant creation: the Organizations empty state offers Create organization.
+`POST /api/tenant-creation` forwards to AuthFortress `/api/v1/tenants` with a
+per-credential limiter, validates the owner role and name, refreshes the first
+membership page, and selects the created organization when it appears. An
+unconfirmed outcome never retries. Webhook setup remains the next onboarding
+slice.
 
 To check and run the optimized build:
 
