@@ -95,8 +95,13 @@ Tenant creation: the Organizations empty state offers Create organization.
 `POST /api/tenant-creation` forwards to AuthFortress `/api/v1/tenants` with a
 per-credential limiter, validates the owner role and name, refreshes the first
 membership page, and selects the created organization when it appears. An
-unconfirmed outcome never retries. Webhook setup remains the next onboarding
-slice.
+unconfirmed outcome never retries. Webhook setup: owners see Configure webhook for active bots, with an explicit
+confirmation that this sets the Telegram webhook. `POST /api/bot-webhook-setup`
+calls the backend apply route with exactly `{"dry_run": false}`; the webhook URL
+and secret stay backend-owned and are never returned. On success the bot
+inventory refreshes so the stored status is shown. The Bots view also shows a
+client-side onboarding checklist derived from already-loaded data; the
+first-reply item stays pending until an operator enables AI processing.
 
 To check and run the optimized build:
 
