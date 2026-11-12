@@ -102,6 +102,17 @@ Source publication and isolated acceptance do not establish adoption by the
 existing local deployment. Fresh root tooling checks are documented in
 [local checks](docs/local-checks.md).
 
+### Root Telegram E2E wiring gate — 2026-11-12
+
+[Slice 1](specs/root-telegram-e2e.md) publishes a static regression gate in
+[tests/test_verify_root_telegram_wiring.py](tests/test_verify_root_telegram_wiring.py).
+It parses `docker-compose.yml` and `.env.example` and fails closed on platform
+flags that stop defaulting to false, bot-credential or provider-key leakage
+into the wrong process, pairwise hop-key drift, profile membership changes, or
+a published port that leaves loopback. It does not start Docker, change the
+stack, or make a Telegram/provider call. Full root suite: 175 tests, Ruff and
+compileall green.
+
 ### Historical applied local release — 2026-10-13
 
 The recorded local acceptance covers **989 distinct tests**: AuthFortress 196,
