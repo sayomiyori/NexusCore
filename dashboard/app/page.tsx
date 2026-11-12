@@ -85,6 +85,7 @@ export default function Page() {
   const [busy, setBusy] = useState(false);
   const [mfa, setMfa] = useState(false);
   const [registering, setRegistering] = useState(false);
+  const [creatingTenant, setCreatingTenant] = useState(false);
   const query = useRef<AbortController | null>(null);
   const membershipQuery = useRef<AbortController | null>(null);
   // Synchronous same-tab guard shared by login and both sign-out actions. React
@@ -364,8 +365,9 @@ export default function Page() {
         { signal: controller.signal },
       );
       if (!controller.signal.aborted) receiveTenants(page);
+      return page;
     } catch (reason) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return null;
       if (reason instanceof RequestError && reason.status === 401) expire();
       else {
         if (refresh) setMembershipState("error");
@@ -375,8 +377,50 @@ export default function Page() {
             : "Unable to load more organizations. Try again.",
         );
       }
+      return null;
     } finally {
       if (!controller.signal.aborted) setBusy(false);
+    }
+  }
+
+  async function createTenant(event: React.SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (authInFlight.current) return;
+    const form = event.currentTarget,
+      values = new FormData(form);
+    const name = String(values.get("name") ?? "").trim();
+    setError("");
+    setNotice("");
+    if (!name) {
+      setError("Enter an organization name.");
+      return;
+    }
+    authInFlight.current = true;
+    setBusy(true);
+    try {
+      const result = await api<{ id: string }>("/api/tenant-creation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      form.reset();
+      setCreatingTenant(false);
+      const page = await moreTenants(true);
+      if (page?.items.some((tenant) => tenant.id === result.id))
+        choose(result.id, "overview");
+      else
+        setNotice(
+          "Organization created. If it does not appear, refresh Organizations.",
+        );
+    } catch (reason) {
+      setError(
+        reason instanceof RequestError
+          ? reason.message
+          : "Unable to create the organization. Try again.",
+      );
+    } finally {
+      authInFlight.current = false;
+      setBusy(false);
     }
   }
 
@@ -839,7 +883,46 @@ export default function Page() {
           ) : !tenants.length ? (
             <section className="empty panel">
               <h2>No organizations yet</h2>
-              <p>This account has no available tenant memberships.</p>
+              <p>Create your first organization to register a bot.</p>
+              {creatingTenant ? (
+                <form onSubmit={createTenant} className="form-card">
+                  <label>
+                    Organization name
+                    <input name="name" required maxLength={128} />
+                  </label>
+                  <button
+                    type="submit"
+                    className="primary"
+                    disabled={busy || savingSettings}
+                  >
+                    {busy ? "Please wait…" : "Create organization"}
+                  </button>
+                  <button
+                    type="button"
+                    className="text-button"
+                    disabled={busy || savingSettings}
+                    onClick={() => {
+                      setCreatingTenant(false);
+                      setError("");
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busy || savingSettings}
+                  onClick={() => {
+                    setCreatingTenant(true);
+                    setError("");
+                    setNotice("");
+                  }}
+                >
+                  Create organization
+                </button>
+              )}
             </section>
           ) : pending ? (
             <section className="empty panel" aria-live="polite">
