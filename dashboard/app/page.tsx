@@ -84,6 +84,7 @@ export default function Page() {
   const [previousSession, setPreviousSession] = useState(false);
   const [busy, setBusy] = useState(false);
   const [mfa, setMfa] = useState(false);
+  const [registering, setRegistering] = useState(false);
   const query = useRef<AbortController | null>(null);
   const membershipQuery = useRef<AbortController | null>(null);
   // Synchronous same-tab guard shared by login and both sign-out actions. React
@@ -267,6 +268,45 @@ export default function Page() {
     }
   }
 
+  async function register(event: React.SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (authInFlight.current) return;
+    const form = event.currentTarget,
+      values = new FormData(form);
+    const password = String(values.get("password") ?? "");
+    setError("");
+    setNotice("");
+    if (password !== String(values.get("repeat") ?? "")) {
+      setError("Passwords do not match.");
+      return;
+    }
+    authInFlight.current = true;
+    setBusy(true);
+    try {
+      await api<{ registered: boolean }>("/api/account-registration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: values.get("email"),
+          username: values.get("username"),
+          password,
+        }),
+      });
+      form.reset();
+      setRegistering(false);
+      setNotice("Account created. Sign in to continue.");
+    } catch (reason) {
+      setError(
+        reason instanceof RequestError
+          ? reason.message
+          : "Unable to create account. Try again.",
+      );
+    } finally {
+      authInFlight.current = false;
+      setBusy(false);
+    }
+  }
+
   async function signOutPrevious() {
     if (authInFlight.current) return;
     authInFlight.current = true;
@@ -435,14 +475,22 @@ export default function Page() {
         <section className="login-form">
           <div className="form-card">
             <span className="eyebrow">NEXUSCORE WORKSPACE</span>
-            <h2>{mfa ? "Verify your sign-in" : "Sign in"}</h2>
+            <h2>
+              {registering
+                ? "Create account"
+                : mfa
+                  ? "Verify your sign-in"
+                  : "Sign in"}
+            </h2>
             <p>
-              {mfa
-                ? "Enter an authenticator or one-use backup code."
-                : "Continue with your AuthFortress account."}
+              {registering
+                ? "Start with an AuthFortress account, then create your organization."
+                : mfa
+                  ? "Enter an authenticator or one-use backup code."
+                  : "Continue with your AuthFortress account."}
             </p>
             {status}
-            <form onSubmit={signIn}>
+            <form onSubmit={registering ? register : signIn}>
               {mfa ? (
                 <label>
                   Verification code
@@ -455,6 +503,50 @@ export default function Page() {
                     maxLength={32}
                   />
                 </label>
+              ) : registering ? (
+                <>
+                  <label>
+                    Email
+                    <input
+                      name="email"
+                      type="email"
+                      autoComplete="username"
+                      required
+                      maxLength={254}
+                    />
+                  </label>
+                  <label>
+                    Username
+                    <input
+                      name="username"
+                      autoComplete="username"
+                      required
+                      maxLength={128}
+                    />
+                  </label>
+                  <label>
+                    Password
+                    <input
+                      name="password"
+                      type="password"
+                      autoComplete="new-password"
+                      required
+                      minLength={1}
+                      maxLength={1024}
+                    />
+                  </label>
+                  <label>
+                    Repeat password
+                    <input
+                      name="repeat"
+                      type="password"
+                      autoComplete="new-password"
+                      required
+                      minLength={1}
+                      maxLength={1024}
+                    />
+                  </label>
+                </>
               ) : (
                 <>
                   <label>
@@ -486,9 +578,11 @@ export default function Page() {
               >
                 {busy
                   ? "Please wait…"
-                  : mfa
-                    ? "Verify and continue"
-                    : "Continue to workspace"}
+                  : registering
+                    ? "Create account"
+                    : mfa
+                      ? "Verify and continue"
+                      : "Continue to workspace"}
                 <span aria-hidden="true">→</span>
               </button>
               {mfa && (
@@ -502,6 +596,20 @@ export default function Page() {
                   }}
                 >
                   Back to sign in
+                </button>
+              )}
+              {!mfa && (
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={busy || savingSettings}
+                  onClick={() => {
+                    setRegistering(!registering);
+                    setError("");
+                    setNotice("");
+                  }}
+                >
+                  {registering ? "Back to sign in" : "Create account"}
                 </button>
               )}
             </form>
