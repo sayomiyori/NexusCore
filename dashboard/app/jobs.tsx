@@ -20,13 +20,17 @@ import type { JobPage } from "../lib/jobs.ts";
 export default function Jobs({
   data,
   canFirst,
+  canPrevious,
   onFirst,
+  onPrevious,
   onNext,
   onExpired,
 }: {
   data: BotPage;
   canFirst: boolean;
+  canPrevious: boolean;
   onFirst: () => void;
+  onPrevious: () => void;
   onNext: () => void;
   onExpired: () => void;
 }) {
@@ -147,6 +151,14 @@ export default function Jobs({
           onClick={onFirst}
         >
           First bot page
+        </button>
+        <button
+          type="button"
+          className="refresh"
+          disabled={!canPrevious}
+          onClick={onPrevious}
+        >
+          <span aria-hidden="true">←</span> Previous bot page
         </button>
         <button
           type="button"

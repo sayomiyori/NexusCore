@@ -21,9 +21,15 @@ changes, dependencies, migrations, raw job content or business mutations.
   null; a nonnull next cursor is legal only for 50 items and must equal the last
   job ID. Do not impose the Bots API's different full-page cursor rule.
 - Native AI jobs navigation reuses paged active-bot selection. Load jobs is
-  explicit; First job page/Next job page operate separately from First bot page/
-  Next bot page. Changing bot or parent scope/page/section/Refresh aborts and
-  clears prior job pages; ignore late responses and expire shared session on401.
+  explicit; First job page/Previous job page/Next job page operate separately
+  from First bot page/Previous bot page/Next bot page. Bot-page navigation
+  reuses the visited-cursor history already used by Bots, Usage and AI
+  Configuration: Next pushes the page being left, Previous pops it and First
+  clears it, each only after a successful non-aborted bot-page read, capped at
+  50 entries with the oldest dropped. First is unavailable only on the first
+  page and Previous only when no earlier bot page was visited. Changing bot or
+  parent scope/page/section/Refresh aborts and clears prior job pages; ignore
+  late responses and expire shared session on401.
 - Job page navigation keeps a visited-cursor history and a separate attempted
   action. The history stores the cursor of each page left behind, capped at 50
   entries with the oldest dropped, and it is pushed, popped or cleared only after
