@@ -336,12 +336,15 @@ loop. All exits stop owned containers and retain credential-free receipts and
 volumes. See [the isolated workflow](docs/isolated-smoke.md); existing root data,
 WSL settings and live Telegram/LLM are outside these commands.
 
-A passing root smoke still reproduces three gaps in the standalone route it uses
-(the opt-in platform intake has separate controlled acceptance):
-
-- WebHook Manager requires its own API key and rejects an AuthFortress bearer JWT with 401.
-- Signed ingress requires `X-Webhook-Signature` HMAC; Telegram's secret-token header alone returns 401.
-- Delivery preserves the Telegram JSON fields, but AgentHub `/api/v1/query` requires `question` and returns 422 for that payload. Delivery does not send the generated answer to Telegram.
+The root smoke exercises the *standalone* route. Its three boundary checks are
+intentional and retained: API-key-only auth, HMAC-only signed ingress, and
+`/api/v1/query` requiring `question` with no Telegram return path. The root
+Telegram flow closes the gaps through the opt-in platform route instead:
+AuthFortress bearer authorization, per-bot secret-token intake, signed
+admission, scoped generation, signed answer admission and WebHook send. See
+[the E2E contract](specs/root-telegram-e2e.md) and the
+[activation runbook](docs/root-telegram-e2e-activation.md). Activation remains
+separately approved work.
 
 ## Next work
 
@@ -350,8 +353,9 @@ Cloudflare origin for one registered bot. It includes an isolated nginx acceptan
 check and explicit preparation/cleanup instructions. It does not install a
 webhook or enable the root AI flow.
 
-1. Keep live features disabled until a separately approved activation and current
-   [AI/reply flow](specs/telegram-ai-reply.md) acceptance.
+1. Keep live features disabled until the
+   [activation runbook](docs/root-telegram-e2e-activation.md) gate is satisfied
+   and a separately approved activation is recorded.
 2. Verify public deployment, portable/off-host recovery and capacity when the
    required infrastructure and access are available.
 3. Connect the event/log pipelines only as separately requested
