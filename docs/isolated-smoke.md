@@ -27,7 +27,6 @@ cached image; each fixture requires an exact match and rejects unknown heads.
 The AI command runs its controlled chain, stops it, then runs a separate
 standalone fixture. `--scanners` uses the real permanent recovery CLI entrypoints
 in both fixtures. The standalone scanner can also be checked alone:
-
 ```powershell
 ../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_stack.py --scanners
 ```
@@ -605,6 +604,25 @@ scanner state, DNS reconstruction and data preservation. No application or Docke
 configuration fix was needed. Private command receipts and comparisons remain
 under `.venv`. This verifies one native restart, not Windows reboot, forced
 failure, sleep/resume or live Telegram/LLM behavior.
+
+## Root-derived Telegram E2E acceptance — 2026-11-13
+
+`scripts/verify_root_telegram_e2e.py` renders the actual root Compose with
+synthetic variables and overlays the reviewed controlled fixture with those
+service environments. Only storage URLs, synthetic secrets, fixture platform
+flags and the fixture host allowlist differ; every other root value, including
+pairwise key presence and model settings, is the one under test.
+
+```powershell
+../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_root_telegram_e2e.py
+../WebHook_Manager/.venv/Scripts/python.exe scripts/verify_root_telegram_e2e.py --scanners
+```
+
+Receipt contract: `root_compose_sha256`, `rendered_config_sha256`, `mapping`,
+`checks` (generation, usage, send, lost receipts, publication attempts, tenant
+and deactivation denial), `gap_closures`, `external_calls_enabled=false` and
+`owned_containers_stopped`. Accepted on 2026-11-13 in both modes; the standalone
+`verify_stack.py` and `verify_telegram_ai.py --scanners` remain green.
 
 ## Regression commands
 
