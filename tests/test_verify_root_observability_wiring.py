@@ -136,6 +136,16 @@ class RootObservabilityEventsWiringTests(unittest.TestCase):
             self.assertIn(key, self.env_example)
             self.assertEqual(self.env_example[key], "", key)
 
+    def test_profile_variables_default_empty_for_default_commands(self) -> None:
+        compose = COMPOSE.read_text(encoding="utf-8")
+        for key in (
+            "EVENTPIPE_DATABASE_URL",
+            "SEAWEEDFS_ACCESS_KEY",
+            "SEAWEEDFS_SECRET_KEY",
+        ):
+            self.assertIn(f"${{{key}:-}}", compose)
+            self.assertNotIn(f"${{{key}:?", compose)
+
     def test_database_password_is_a_secret_and_urls_are_operator_supplied(self) -> None:
         postgres = self.services["eventpipe_postgres"]
         environment = postgres.get("environment") or {}

@@ -518,8 +518,8 @@ services:
     logging: *default_logging
     command: server -dir=/data -s3 -filer -ip=seaweedfs
     environment:
-      AWS_ACCESS_KEY_ID: ${SEAWEEDFS_ACCESS_KEY:?Set SEAWEEDFS_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${SEAWEEDFS_SECRET_KEY:?Set SEAWEEDFS_SECRET_KEY}
+      AWS_ACCESS_KEY_ID: ${SEAWEEDFS_ACCESS_KEY:-}
+      AWS_SECRET_ACCESS_KEY: ${SEAWEEDFS_SECRET_KEY:-}
     volumes:
       - nexus_eventpipe_seaweed_data:/data
     networks: [observability_events_net]
@@ -569,7 +569,7 @@ services:
     logging: *default_logging
     command: ["alembic", "upgrade", "head"]
     environment:
-      TRANSFORM_DATABASE_URL: ${EVENTPIPE_DATABASE_URL:?Set EVENTPIPE_DATABASE_URL}
+      TRANSFORM_DATABASE_URL: ${EVENTPIPE_DATABASE_URL:-}
       TRANSFORM_PLATFORM_MODE: "true"
     depends_on:
       eventpipe_postgres:
@@ -622,10 +622,10 @@ services:
       TRANSFORM_KAFKA_TOPIC_RAW: events.raw
       TRANSFORM_KAFKA_TOPIC_DLQ: events.dlq
       TRANSFORM_KAFKA_GROUP_ID: transform-workers
-      TRANSFORM_DATABASE_URL: ${EVENTPIPE_DATABASE_URL:?Set EVENTPIPE_DATABASE_URL}
+      TRANSFORM_DATABASE_URL: ${EVENTPIPE_DATABASE_URL:-}
       TRANSFORM_S3_ENDPOINT_URL: http://seaweedfs:8333
-      TRANSFORM_S3_ACCESS_KEY: ${SEAWEEDFS_ACCESS_KEY:?Set SEAWEEDFS_ACCESS_KEY}
-      TRANSFORM_S3_SECRET_KEY: ${SEAWEEDFS_SECRET_KEY:?Set SEAWEEDFS_SECRET_KEY}
+      TRANSFORM_S3_ACCESS_KEY: ${SEAWEEDFS_ACCESS_KEY:-}
+      TRANSFORM_S3_SECRET_KEY: ${SEAWEEDFS_SECRET_KEY:-}
       TRANSFORM_S3_BUCKET_RAW: raw-events
       TRANSFORM_S3_REGION: us-east-1
       TRANSFORM_HEALTH_HOST: 0.0.0.0
@@ -661,11 +661,11 @@ services:
     environment:
       QUERY_API_HOST: 0.0.0.0
       QUERY_API_PORT: 8020
-      QUERY_DATABASE_URL: ${EVENTPIPE_DATABASE_URL:?Set EVENTPIPE_DATABASE_URL}
+      QUERY_DATABASE_URL: ${EVENTPIPE_DATABASE_URL:-}
       QUERY_S3_ENDPOINT_URL: http://seaweedfs:8333
       QUERY_S3_PUBLIC_URL: http://seaweedfs:8333
-      QUERY_S3_ACCESS_KEY: ${SEAWEEDFS_ACCESS_KEY:?Set SEAWEEDFS_ACCESS_KEY}
-      QUERY_S3_SECRET_KEY: ${SEAWEEDFS_SECRET_KEY:?Set SEAWEEDFS_SECRET_KEY}
+      QUERY_S3_ACCESS_KEY: ${SEAWEEDFS_ACCESS_KEY:-}
+      QUERY_S3_SECRET_KEY: ${SEAWEEDFS_SECRET_KEY:-}
       QUERY_S3_BUCKET_RAW: raw-events
       QUERY_S3_REGION: us-east-1
       QUERY_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
