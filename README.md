@@ -118,6 +118,18 @@ modes passed on 2026-11-13, and the standalone `verify_stack.py` and
 `verify_telegram_ai.py --scanners` stayed green. No root `.env`, host port,
 real Telegram or provider call is used.
 
+### Root observability events profile — 2026-11-14
+
+The opt-in `observability-events` Compose profile defines ZooKeeper, Kafka,
+a dedicated EventPipe PostgreSQL, SeaweedFS, a one-shot migration job and the
+EventPipe ingest/transform/query services. It never starts on a plain
+`docker compose up`. The static wiring gate is
+[tests/test_verify_root_observability_wiring.py](tests/test_verify_root_observability_wiring.py).
+Runtime acceptance is **Blocked** until the sibling EventPipe revision that
+carries the tenant-boundary migrations (currently the pushed
+`wip/home-2026-11-14` branch) is reviewed and adopted; Stage 1 evidence will be
+recorded then.
+
 ### Historical applied local release — 2026-10-13
 
 The recorded local acceptance covers **989 distinct tests**: AuthFortress 196,
