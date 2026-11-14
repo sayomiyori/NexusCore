@@ -1,11 +1,20 @@
 networks:
   nexus_net:
     driver: bridge
+  # Opt-in Stage 1 network: Kafka/ZooKeeper/EventPipe PostgreSQL/SeaweedFS/
+  # transform/query have no internet egress. Ingest and query also join
+  # nexus_net because they call AuthFortress.
+  observability_events_net:
+    driver: bridge
+    internal: true
 
 volumes:
   nexus_postgres_data:
   nexus_redis_data:
   nexus_agent_uploads:
+  nexus_eventpipe_postgres_data:
+  nexus_eventpipe_seaweed_data:
+  nexus_kafka_data:
 
 # Shared container defaults: unbounded json-file logs can fill the host disk.
 x-default-logging: &default_logging
@@ -410,3 +419,266 @@ services:
     depends_on: *webhook_sender_dependencies
     environment: *webhook_sender_environment
     networks: [nexus_net]
+
+  # --- observability-events profile (Stage 1, opt-in) ---------------------
+  # Never started by a plain `docker compose up`. EventPipe keeps its own
+  # PostgreSQL, Kafka/ZooKeeper and SeaweedFS; the root stack is not reused.
+  zookeeper:
+    profiles: [observability-events]
+    image: confluentinc/cp-zookeeper:7.5.0@sha256:02f6c042bb9a7844382fc4cedc513a44585d8a5acae873fb9e510e3ca9dcabc6
+    restart: unless-stopped
+    logging: *default_logging
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks: [observability_events_net]
+    healthcheck:
+      test: ["CMD-SHELL", "cub zk-ready localhost 2181 30"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  kafka:
+    profiles: [observability-events]
+    image: confluentinc/cp-kafka:7.5.0@sha256:fbbb6fa11b258a88b83f54d4f0bddfcffbf2279f99d66a843486e3da7bdfbf41
+    restart: unless-stopped
+    logging: *default_logging
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 24
+    volumes:
+      - nexus_kafka_data:/var/lib/kafka/data
+    networks: [observability_events_net]
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 40s
+
+  kafka_init:
+    profiles: [observability-events]
+    image: confluentinc/cp-kafka:7.5.0@sha256:fbbb6fa11b258a88b83f54d4f0bddfcffbf2279f99d66a843486e3da7bdfbf41
+    restart: "no"
+    logging: *default_logging
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 \
+          --topic events.raw --partitions 3 --replication-factor 1
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 \
+          --topic events.dlq --partitions 1 --replication-factor 1
+    networks: [observability_events_net]
+
+  eventpipe_postgres:
+    profiles: [observability-events]
+    image: postgres:16-alpine@sha256:f377d590e5474681d4d7838635031a2b50647923b7abfa803ce9b5ff35d5c663
+    restart: unless-stopped
+    logging: *default_logging
+    environment:
+      POSTGRES_USER: eventpipe
+      POSTGRES_PASSWORD: ${EVENTPIPE_DB_PASSWORD:?Set EVENTPIPE_DB_PASSWORD}
+      POSTGRES_DB: eventpipe
+    volumes:
+      - nexus_eventpipe_postgres_data:/var/lib/postgresql/data
+    networks: [observability_events_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eventpipe -d eventpipe"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  seaweedfs:
+    profiles: [observability-events]
+    image: chrislusf/seaweedfs:3.75@sha256:52d4955fa82e9edd426bf5d73467dfe5ad441ffa9c39aa31e96e1c2988e72755
+    restart: unless-stopped
+    logging: *default_logging
+    command: server -dir=/data -s3 -filer -ip=seaweedfs
+    environment:
+      AWS_ACCESS_KEY_ID: ${SEAWEEDFS_ACCESS_KEY:?Set SEAWEEDFS_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${SEAWEEDFS_SECRET_KEY:?Set SEAWEEDFS_SECRET_KEY}
+    volumes:
+      - nexus_eventpipe_seaweed_data:/data
+    networks: [observability_events_net]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9333/cluster/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  seaweedfs_init:
+    profiles: [observability-events]
+    image: python:3.11-alpine@sha256:7fbad8e4652eae0186429a6f26cf5b23e27e8c6fd7ac4d0cfd7a6988cdeea1e1
+    restart: "no"
+    logging: *default_logging
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    # Bucket creation pulls boto3, so this one-shot joins the egress-capable
+    # application network; it exits before the applications start.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        pip install boto3 --quiet
+        python -c "
+        import boto3, time, urllib.request
+        while True:
+            try:
+                urllib.request.urlopen('http://seaweedfs:8333')
+                break
+            except Exception:
+                time.sleep(2)
+        s3 = boto3.client('s3', endpoint_url='http://seaweedfs:8333', aws_access_key_id='${SEAWEEDFS_ACCESS_KEY}', aws_secret_access_key='${SEAWEEDFS_SECRET_KEY}', region_name='us-east-1')
+        try:
+            s3.create_bucket(Bucket='raw-events')
+        except Exception:
+            pass
+        "
+    networks: [nexus_net, observability_events_net]
+
+  eventpipe_migrate:
+    profiles: [observability-events]
+    build:
+      context: ../EventPipe
+      dockerfile: transform_service/Dockerfile
+    restart: "no"
+    logging: *default_logging
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      TRANSFORM_DATABASE_URL: postgresql+asyncpg://eventpipe:${EVENTPIPE_DB_PASSWORD:?Set EVENTPIPE_DB_PASSWORD}@eventpipe_postgres:5432/eventpipe
+      TRANSFORM_PLATFORM_MODE: "true"
+    depends_on:
+      eventpipe_postgres:
+        condition: service_healthy
+    networks: [observability_events_net]
+
+  eventpipe_ingest:
+    profiles: [observability-events]
+    build:
+      context: ../EventPipe
+      dockerfile: ingest_service/Dockerfile
+    restart: unless-stopped
+    logging: *default_logging
+    ports:
+      - "127.0.0.1:28013:8013"
+    environment:
+      EVENTPIPE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      EVENTPIPE_KAFKA_TOPIC_RAW: events.raw
+      EVENTPIPE_API_HOST: 0.0.0.0
+      EVENTPIPE_API_PORT: 8013
+      EVENTPIPE_GRPC_HOST: 0.0.0.0
+      EVENTPIPE_GRPC_PORT: 50051
+      EVENTPIPE_PLATFORM_MODE: "true"
+      EVENTPIPE_AUTH_URL: http://auth_service:8000
+      METRICS_ENABLED: "false"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka_init:
+        condition: service_completed_successfully
+      auth_service:
+        condition: service_healthy
+    networks: [nexus_net, observability_events_net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8013/health', timeout=2)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  eventpipe_transform:
+    profiles: [observability-events]
+    build:
+      context: ../EventPipe
+      dockerfile: transform_service/Dockerfile
+    restart: unless-stopped
+    logging: *default_logging
+    environment:
+      TRANSFORM_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TRANSFORM_KAFKA_TOPIC_RAW: events.raw
+      TRANSFORM_KAFKA_TOPIC_DLQ: events.dlq
+      TRANSFORM_KAFKA_GROUP_ID: transform-workers
+      TRANSFORM_DATABASE_URL: postgresql+asyncpg://eventpipe:${EVENTPIPE_DB_PASSWORD:?Set EVENTPIPE_DB_PASSWORD}@eventpipe_postgres:5432/eventpipe
+      TRANSFORM_S3_ENDPOINT_URL: http://seaweedfs:8333
+      TRANSFORM_S3_ACCESS_KEY: ${SEAWEEDFS_ACCESS_KEY:?Set SEAWEEDFS_ACCESS_KEY}
+      TRANSFORM_S3_SECRET_KEY: ${SEAWEEDFS_SECRET_KEY:?Set SEAWEEDFS_SECRET_KEY}
+      TRANSFORM_S3_BUCKET_RAW: raw-events
+      TRANSFORM_S3_REGION: us-east-1
+      TRANSFORM_HEALTH_HOST: 0.0.0.0
+      TRANSFORM_HEALTH_PORT: 9101
+      TRANSFORM_PLATFORM_MODE: "true"
+      METRICS_ENABLED: "false"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka_init:
+        condition: service_completed_successfully
+      eventpipe_postgres:
+        condition: service_healthy
+      seaweedfs_init:
+        condition: service_completed_successfully
+    networks: [observability_events_net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9101/health', timeout=2)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  eventpipe_query:
+    profiles: [observability-events]
+    build:
+      context: ../EventPipe
+      dockerfile: query_service/Dockerfile
+    restart: unless-stopped
+    logging: *default_logging
+    ports:
+      - "127.0.0.1:28020:8020"
+    environment:
+      QUERY_API_HOST: 0.0.0.0
+      QUERY_API_PORT: 8020
+      QUERY_DATABASE_URL: postgresql+asyncpg://eventpipe:${EVENTPIPE_DB_PASSWORD:?Set EVENTPIPE_DB_PASSWORD}@eventpipe_postgres:5432/eventpipe
+      QUERY_S3_ENDPOINT_URL: http://seaweedfs:8333
+      QUERY_S3_PUBLIC_URL: http://seaweedfs:8333
+      QUERY_S3_ACCESS_KEY: ${SEAWEEDFS_ACCESS_KEY:?Set SEAWEEDFS_ACCESS_KEY}
+      QUERY_S3_SECRET_KEY: ${SEAWEEDFS_SECRET_KEY:?Set SEAWEEDFS_SECRET_KEY}
+      QUERY_S3_BUCKET_RAW: raw-events
+      QUERY_S3_REGION: us-east-1
+      QUERY_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUERY_KAFKA_TOPIC_DLQ: events.dlq
+      QUERY_PLATFORM_MODE: "true"
+      QUERY_AUTH_URL: http://auth_service:8000
+      METRICS_ENABLED: "false"
+    depends_on:
+      eventpipe_postgres:
+        condition: service_healthy
+      seaweedfs_init:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+      kafka_init:
+        condition: service_completed_successfully
+      auth_service:
+        condition: service_healthy
+    networks: [nexus_net, observability_events_net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8020/health', timeout=2)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
