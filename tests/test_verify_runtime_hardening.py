@@ -21,11 +21,24 @@ WORKERS = {
     "webhook_sender",
     "webhook_send_recovery",
 }
+OBSERVABILITY_EVENTS = {
+    "zookeeper",
+    "kafka",
+    "kafka_init",
+    "eventpipe_postgres",
+    "seaweedfs",
+    "seaweedfs_init",
+    "eventpipe_migrate",
+    "eventpipe_ingest",
+    "eventpipe_transform",
+    "eventpipe_query",
+}
 SERVICES = {
     "postgres",
     "redis",
     *API_SERVICES,
     *WORKERS,
+    *OBSERVABILITY_EVENTS,
 }
 SERVICE_HEADER = re.compile(r"^  ([a-z0-9][a-z0-9_.-]*):$", re.MULTILINE)
 PINNED_IMAGE = re.compile(r"^[^@\s]+@sha256:[0-9a-f]{64}$")
