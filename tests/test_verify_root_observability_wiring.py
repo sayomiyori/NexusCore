@@ -127,9 +127,28 @@ class RootObservabilityEventsWiringTests(unittest.TestCase):
             self.assertIn("kafka_init", depends, name)
 
     def test_env_example_has_placeholders_only(self) -> None:
-        for key in ("EVENTPIPE_DB_PASSWORD", "SEAWEEDFS_ACCESS_KEY", "SEAWEEDFS_SECRET_KEY"):
+        for key in (
+            "EVENTPIPE_DB_PASSWORD",
+            "EVENTPIPE_DATABASE_URL",
+            "SEAWEEDFS_ACCESS_KEY",
+            "SEAWEEDFS_SECRET_KEY",
+        ):
             self.assertIn(key, self.env_example)
             self.assertEqual(self.env_example[key], "", key)
+
+    def test_database_password_is_a_secret_and_urls_are_operator_supplied(self) -> None:
+        postgres = self.services["eventpipe_postgres"]
+        environment = postgres.get("environment") or {}
+        self.assertEqual(
+            environment.get("POSTGRES_PASSWORD_FILE"),
+            "/run/secrets/eventpipe_db_password",
+        )
+        self.assertIn("eventpipe_db_password", postgres.get("secrets") or [])
+        compose = COMPOSE.read_text(encoding="utf-8")
+        self.assertNotIn("eventpipe:${", compose)
+        for name in ("eventpipe_migrate", "eventpipe_transform", "eventpipe_query"):
+            values = " ".join(str(value) for value in (self.env(name) or {}).values())
+            self.assertIn("EVENTPIPE_DATABASE_URL", values, name)
 
 
 if __name__ == "__main__":

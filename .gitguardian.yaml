@@ -1,8 +1,0 @@
-version: 2
-secret:
-  # Compose required-variable placeholders are variable references, not secret
-  # values: ${VAR:?message}. Ignore only that exact shape so real credentials
-  # added to the repository are still reported.
-  ignored-matches:
-    - name: compose-required-variable-placeholder
-      match: '\$\{[A-Za-z0-9_]+:\?[^}]*\}'

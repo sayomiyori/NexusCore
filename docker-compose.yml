@@ -16,6 +16,13 @@ volumes:
   nexus_eventpipe_seaweed_data:
   nexus_kafka_data:
 
+# EventPipe database password is mounted as a Compose secret; the application
+# services receive a ready DATABASE_URL from the operator environment instead of
+# a user:password literal in this file.
+secrets:
+  eventpipe_db_password:
+    environment: EVENTPIPE_DB_PASSWORD
+
 # Shared container defaults: unbounded json-file logs can fill the host disk.
 x-default-logging: &default_logging
   driver: json-file
@@ -490,8 +497,10 @@ services:
     logging: *default_logging
     environment:
       POSTGRES_USER: eventpipe
-      POSTGRES_PASSWORD: ${EVENTPIPE_DB_PASSWORD:?Set EVENTPIPE_DB_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/secrets/eventpipe_db_password
       POSTGRES_DB: eventpipe
+    secrets:
+      - eventpipe_db_password
     volumes:
       - nexus_eventpipe_postgres_data:/var/lib/postgresql/data
     networks: [observability_events_net]
@@ -560,7 +569,7 @@ services:
     logging: *default_logging
     command: ["alembic", "upgrade", "head"]
     environment:
-      TRANSFORM_DATABASE_URL: postgresql+asyncpg://eventpipe:${EVENTPIPE_DB_PASSWORD:?Set EVENTPIPE_DB_PASSWORD}@eventpipe_postgres:5432/eventpipe
+      TRANSFORM_DATABASE_URL: ${EVENTPIPE_DATABASE_URL:?Set EVENTPIPE_DATABASE_URL}
       TRANSFORM_PLATFORM_MODE: "true"
     depends_on:
       eventpipe_postgres:
@@ -613,7 +622,7 @@ services:
       TRANSFORM_KAFKA_TOPIC_RAW: events.raw
       TRANSFORM_KAFKA_TOPIC_DLQ: events.dlq
       TRANSFORM_KAFKA_GROUP_ID: transform-workers
-      TRANSFORM_DATABASE_URL: postgresql+asyncpg://eventpipe:${EVENTPIPE_DB_PASSWORD:?Set EVENTPIPE_DB_PASSWORD}@eventpipe_postgres:5432/eventpipe
+      TRANSFORM_DATABASE_URL: ${EVENTPIPE_DATABASE_URL:?Set EVENTPIPE_DATABASE_URL}
       TRANSFORM_S3_ENDPOINT_URL: http://seaweedfs:8333
       TRANSFORM_S3_ACCESS_KEY: ${SEAWEEDFS_ACCESS_KEY:?Set SEAWEEDFS_ACCESS_KEY}
       TRANSFORM_S3_SECRET_KEY: ${SEAWEEDFS_SECRET_KEY:?Set SEAWEEDFS_SECRET_KEY}
@@ -652,7 +661,7 @@ services:
     environment:
       QUERY_API_HOST: 0.0.0.0
       QUERY_API_PORT: 8020
-      QUERY_DATABASE_URL: postgresql+asyncpg://eventpipe:${EVENTPIPE_DB_PASSWORD:?Set EVENTPIPE_DB_PASSWORD}@eventpipe_postgres:5432/eventpipe
+      QUERY_DATABASE_URL: ${EVENTPIPE_DATABASE_URL:?Set EVENTPIPE_DATABASE_URL}
       QUERY_S3_ENDPOINT_URL: http://seaweedfs:8333
       QUERY_S3_PUBLIC_URL: http://seaweedfs:8333
       QUERY_S3_ACCESS_KEY: ${SEAWEEDFS_ACCESS_KEY:?Set SEAWEEDFS_ACCESS_KEY}
