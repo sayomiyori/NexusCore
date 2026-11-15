@@ -125,6 +125,9 @@ class RootObservabilityEventsWiringTests(unittest.TestCase):
         for name in ("eventpipe_ingest", "eventpipe_transform", "eventpipe_query"):
             depends = self.services[name].get("depends_on") or {}
             self.assertIn("kafka_init", depends, name)
+        for name in ("eventpipe_transform", "eventpipe_query"):
+            depends = self.services[name].get("depends_on") or {}
+            self.assertIn("eventpipe_migrate", depends, name)
 
     def test_env_example_has_placeholders_only(self) -> None:
         for key in (

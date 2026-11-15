@@ -639,6 +639,8 @@ services:
         condition: service_completed_successfully
       eventpipe_postgres:
         condition: service_healthy
+      eventpipe_migrate:
+        condition: service_completed_successfully
       seaweedfs_init:
         condition: service_completed_successfully
     networks: [observability_events_net]
@@ -676,6 +678,8 @@ services:
     depends_on:
       eventpipe_postgres:
         condition: service_healthy
+      eventpipe_migrate:
+        condition: service_completed_successfully
       seaweedfs_init:
         condition: service_completed_successfully
       kafka:
