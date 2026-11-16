@@ -139,6 +139,12 @@ class RootObservabilityEventsWiringTests(unittest.TestCase):
             self.assertIn(key, self.env_example)
             self.assertEqual(self.env_example[key], "", key)
 
+    def test_zookeeper_healthcheck_uses_a_supported_cub_form(self) -> None:
+        self.assertEqual(
+            self.services["zookeeper"]["healthcheck"]["test"],
+            ["CMD-SHELL", "cub zk-ready localhost 2181"],
+        )
+
     def test_profile_variables_default_empty_for_default_commands(self) -> None:
         compose = COMPOSE.read_text(encoding="utf-8")
         for key in (
