@@ -7,6 +7,11 @@ networks:
   observability_events_net:
     driver: bridge
     internal: true
+  # Stage 2 network: ClickHouse and its dedicated Redis have no egress.
+  # PipeWatch also joins nexus_net because it calls AuthFortress.
+  observability_logs_net:
+    driver: bridge
+    internal: true
 
 volumes:
   nexus_postgres_data:
@@ -15,6 +20,8 @@ volumes:
   nexus_eventpipe_postgres_data:
   nexus_eventpipe_seaweed_data:
   nexus_kafka_data:
+  nexus_pipewatch_clickhouse_data:
+  nexus_pipewatch_redis_data:
 
 # EventPipe database password is mounted as a Compose secret; the application
 # services receive a ready DATABASE_URL from the operator environment instead of
@@ -695,3 +702,78 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+
+  # --- observability-logs profile (Stage 2, opt-in) ----------------------
+  pipewatch_clickhouse:
+    profiles: [observability-logs]
+    image: clickhouse/clickhouse-server:24@sha256:2113951827761e37c386b37f716dbdf8522b9172488a44b97a96fe6059e172a8
+    restart: unless-stopped
+    logging: *default_logging
+    environment:
+      CLICKHOUSE_DB: pipewatch
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${PIPEWATCH_CLICKHOUSE_PASSWORD:-}
+    volumes:
+      - nexus_pipewatch_clickhouse_data:/var/lib/clickhouse
+    networks: [observability_logs_net]
+    healthcheck:
+      test: ["CMD", "sh", "-c", "clickhouse-client --query 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  pipewatch_redis:
+    profiles: [observability-logs]
+    image: redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+    restart: unless-stopped
+    logging: *default_logging
+    # Losing accepted logs is a correctness failure: durable AOF with an
+    # always fsync and no eviction under memory pressure.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - nexus_pipewatch_redis_data:/data
+    networks: [observability_logs_net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  pipewatch:
+    profiles: [observability-logs]
+    build:
+      context: ../PipeWatch
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    logging: *default_logging
+    ports:
+      - "127.0.0.1:28084:8000"
+    environment:
+      CLICKHOUSE_HOST: pipewatch_clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${PIPEWATCH_CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_DATABASE: pipewatch
+      REDIS_HOST: pipewatch_redis
+      REDIS_PORT: 6379
+      PLATFORM_AUTH_ENABLED: "true"
+      AUTHFORTRESS_URL: http://auth_service:8000
+      TELEGRAM_NOTIFICATIONS_ENABLED: "false"
+      METRICS_ENABLED: "false"
+      APP_BATCH_FLUSH_INTERVAL_SECONDS: 1
+      APP_BATCH_SIZE: 1000
+      TELEGRAM_BOT_TOKEN: ""
+      TELEGRAM_CHAT_ID: ""
+    depends_on:
+      pipewatch_clickhouse:
+        condition: service_healthy
+      pipewatch_redis:
+        condition: service_healthy
+      auth_service:
+        condition: service_healthy
+    networks: [nexus_net, observability_logs_net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
