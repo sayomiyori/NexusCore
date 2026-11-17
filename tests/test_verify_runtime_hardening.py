@@ -33,12 +33,18 @@ OBSERVABILITY_EVENTS = {
     "eventpipe_transform",
     "eventpipe_query",
 }
+OBSERVABILITY_LOGS = {
+    "pipewatch_clickhouse",
+    "pipewatch_redis",
+    "pipewatch",
+}
 SERVICES = {
     "postgres",
     "redis",
     *API_SERVICES,
     *WORKERS,
     *OBSERVABILITY_EVENTS,
+    *OBSERVABILITY_LOGS,
 }
 SERVICE_HEADER = re.compile(r"^  ([a-z0-9][a-z0-9_.-]*):$", re.MULTILINE)
 PINNED_IMAGE = re.compile(r"^[^@\s]+@sha256:[0-9a-f]{64}$")
