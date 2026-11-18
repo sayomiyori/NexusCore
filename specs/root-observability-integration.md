@@ -903,8 +903,8 @@ docker compose --profile observability-events start eventpipe_ingest
 # when EventPipe never accepted the event.
 ```
 
-Backpressure test with a separate, bounded test override (planned test file, not
-a production setting):
+Backpressure test with a separate, bounded test override (test-only, not a
+production setting):
 
 ```powershell
 # docker-compose.observability-test.yml sets APP_QUEUE_MAXSIZE=2 and

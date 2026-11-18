@@ -137,7 +137,9 @@ def metadata_envelope(role, item, tenant_id, bot_id):
             raise ValueError("Canonical tenant mismatch")
         scope_bot = None
         payload = {"tenant_created_at": utc_timestamp(item.created_at), "observed_role": item.role}
-        occurred = utc_timestamp(datetime.now(UTC))
+        # The envelope must stay byte-identical across sweeps: reconciliation compares the
+        # stored payload, so a poll-time timestamp would turn every later sweep into a conflict.
+        occurred = utc_timestamp(item.created_at)
         identity_time = None
     else:
         if item.id != bot_id or item.tenant_id != tenant_id:

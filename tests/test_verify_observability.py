@@ -152,6 +152,8 @@ class RelayTests(unittest.TestCase):
         first = relay.metadata_envelope("auth", item, TENANT, BOT)
         second = relay.metadata_envelope("auth", item, TENANT, uuid4())
         self.assertEqual(first["event_id"], second["event_id"])
+        # Reconciliation compares whole envelopes, so poll time must not leak into occurred_at.
+        self.assertEqual(first, second)
         bot = relay.Bot.model_validate(self.bot)
         equivalent = relay.Bot.model_validate(dict(self.bot, updated_at="2026-10-22T13:00:00+03:00"))
         self.assertEqual(relay.metadata_envelope("webhook", bot, TENANT, BOT),

@@ -1,0 +1,26 @@
+# Disposable override for the Stage 2 PipeWatch backpressure gate.
+#
+# It is never part of the production profile: a separate Compose project plus
+# explicit subnets and a bound queue make the admission decision observable
+# without touching the running root stack.
+#
+#   docker compose -p pipewatch-backpressure \
+#     -f docker-compose.yml -f docker-compose.observability-test.yml \
+#     --profile observability-logs up -d --no-deps pipewatch_clickhouse pipewatch_redis pipewatch
+services:
+  pipewatch:
+    environment:
+      APP_QUEUE_MAXSIZE: "2"
+      APP_BATCH_SIZE: "1"
+    ports: !override
+      - "127.0.0.1:28085:8000"
+
+networks:
+  nexus_net:
+    ipam:
+      config:
+        - subnet: 10.255.252.0/24
+  observability_logs_net:
+    ipam:
+      config:
+        - subnet: 10.255.251.0/24
