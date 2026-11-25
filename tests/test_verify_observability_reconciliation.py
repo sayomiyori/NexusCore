@@ -243,14 +243,14 @@ class ReconciliationTests(unittest.TestCase):
     def test_unknown_row_limit_rejects_before_queries(self):
         with self.db:
             for i in range(101):
-                self.db.execute("INSERT INTO relay_deliveries VALUES (?,'eventpipe','unknown',NULL)", (str(UUID(int=i + 999)),))
+                self.db.execute("INSERT INTO relay_deliveries(event_id,sink,state,receipt) VALUES (?,'eventpipe','unknown',NULL)", (str(UUID(int=i + 999)),))
         with self.assertRaises(ValueError):
             self.worker.reconcile()
         self.assertEqual(self.calls, [])
 
     def test_orphan_unknown_row_is_not_silently_ignored(self):
         with self.db:
-            self.db.execute("INSERT INTO relay_deliveries VALUES (?,'eventpipe','unknown',NULL)", (str(uuid4()),))
+            self.db.execute("INSERT INTO relay_deliveries(event_id,sink,state,receipt) VALUES (?,'eventpipe','unknown',NULL)", (str(uuid4()),))
         before = self.path.read_bytes()
         code, stdout, stderr = self.cli()
         self.assertEqual((code, stdout), (1, ""))

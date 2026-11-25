@@ -471,8 +471,9 @@ These are mandatory for any stage that claims tenant safety:
 
 ### 5.2 Target relay state machine
 
-Current states are `pending`, `unknown`, `accepted`. The target adds a definite
-non-acceptance state and a terminal dead letter:
+Implemented in `scripts/relay_observability.py` and covered by
+`tests/test_verify_observability_retry.py`. States are `pending`, `unknown`,
+`accepted`, plus the definite non-acceptance state and the terminal dead letter:
 
 ```text
 pending -> in_flight -> accepted
@@ -496,8 +497,10 @@ Rules:
 - Retry schedule for `rejected`: base 5 s, factor 2, cap 300 s, jitter ±20 %,
   maximum 8 attempts. Store `next_attempt_at`; a sweep sends only rows whose
   time has arrived. After the limit, `dead_letter` and a nonzero exit.
-- `dead_letter` rows are listed by a read-only operator command, never replayed
-  automatically. Replay is a separate, explicitly approved command.
+- `dead_letter` rows are listed by the read-only operator command
+  `relay_observability.py --dead-letters --state <state.sqlite>` (no origins and
+  no bearer required), never replayed automatically. Replay is a separate,
+  explicitly approved command.
 - This state machine requires consumer idempotency before it can safely retry a
   request that might have been accepted. The `rejected` status is limited to
   responses that prove non-acceptance; otherwise the row stays `unknown`.
@@ -671,7 +674,7 @@ Exit gate:
 
 | Item | Status | Why |
 | --- | --- | --- |
-| Relay `rejected` state and bounded retry/backoff | **Planned** | Requires relay changes and tests; no sibling change |
+| Relay `rejected` state and bounded retry/backoff | **Implemented + Verified (unit)** | 206 root tests, including 8 retry cases; `rejected` only for definite non-acceptance; `--dead-letters` read-only. Live recovery still needs a running stack |
 | Consumer idempotency `(tenant_id, event_id)` in EventPipe and PipeWatch | **Blocked** | Needs sibling contracts, schema/API changes and separate acceptance |
 | Machine-to-machine tenant credential for the relay | **Blocked** | AuthFortress currently authorizes only bearer JWTs for `tenant.manage`; no service principal exists |
 | Containerised relay using Compose DNS names | **Blocked** | The relay's origin validator accepts only numeric IPv4; a bounded internal-host allowlist or a different transport decision is required |
@@ -701,8 +704,8 @@ At the time of writing, the documentation-only change is checked by:
 & D:\Programming\NexusCore\.venv\tooling-checks\Scripts\python.exe -m compileall -q scripts tests
 ```
 
-Observed on this branch: **164 tests OK**, Ruff **All checks passed**. Record the
-new exact count after any test change; do not copy 164 into later evidence.
+Observed on this branch: **206 tests OK**, Ruff **All checks passed**. Record the
+new exact count after any test change; do not copy 206 into later evidence.
 
 ### 8.2 Stage 1 — EventPipe root profile
 
@@ -937,8 +940,11 @@ documented failure, not a false pass.
 #    Current expected failure: 2 in both.
 
 # 2. Relay rejected/retry: stop EventPipe ingest, run one sweep.
-#    Target: state=rejected, next_attempt_at set, exit 1; after recovery, retry
-#    sends once and stores one row. Current expected failure: unknown, no retry.
+#    Implemented: state=rejected with next_attempt_at, exit 1; after recovery and a
+#    due next_attempt_at the relay sends once and stores one row. Attempt limit 8
+#    moves the row to dead_letter. Ambiguous outcomes (timeout, 502, PipeWatch 503)
+#    stay unknown and are never retried. Covered by test_verify_observability_retry.py;
+#    a live outage/recovery run is still outstanding.
 
 # 3. Retention: insert one old and one current synthetic row, run the cleanup
 #    dry run. Target: exactly the old row is selected; no cross-tenant delete.

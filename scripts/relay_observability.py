@@ -4,12 +4,13 @@ import argparse
 import ipaddress
 import json
 import os
+import random
 import sqlite3
 import stat
 import sys
 import time
 from contextlib import closing
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
@@ -27,6 +28,33 @@ MAX_BODY = 256 * 1024
 SINKS = ("eventpipe", "pipewatch")
 EVENT_TYPE = "ai.job.observed"
 SOURCE_TYPES = {"agent": EVENT_TYPE, "auth": "auth.tenant.observed", "webhook": "webhook.bot.observed"}
+
+MAX_ATTEMPTS = 8
+RETRY_BASE_SECONDS = 5
+RETRY_CAP_SECONDS = 300
+DELIVERY_SCHEMA = """
+    CREATE TABLE relay_deliveries(
+        event_id TEXT NOT NULL REFERENCES relay_events(id), sink TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('pending','unknown','accepted','rejected','dead_letter')),
+        receipt TEXT, attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at TEXT, last_status TEXT, PRIMARY KEY(event_id,sink));
+"""
+# Only these responses prove the receiver stored nothing. EventPipe answers 503 when
+# Kafka rejected the write; PipeWatch has no equivalent contract, so its 503 stays ambiguous.
+DEFINITE_REJECTIONS = frozenset({400, 401, 403, 404, 422, 429})
+RECEIVER_REJECTIONS = {"eventpipe": DEFINITE_REJECTIONS | {503}, "pipewatch": DEFINITE_REJECTIONS}
+
+
+def retry_delay(attempts):
+    # attempts is the number of requests already made; jitter applies after the cap.
+    base = min(RETRY_CAP_SECONDS, RETRY_BASE_SECONDS * 2 ** (attempts - 1))
+    return base * random.uniform(0.8, 1.2)
+
+
+class ResponseStatus(ValueError):
+    def __init__(self, status):
+        super().__init__("Unexpected response")
+        self.status = status
 
 
 class Parser(argparse.ArgumentParser):
@@ -75,6 +103,19 @@ def origin(value):
     return f"{parsed.scheme}://{address}:{parsed.port or (443 if parsed.scheme == 'https' else 80)}"
 
 
+def migrate_state(db):
+    columns = {row[1] for row in db.execute("PRAGMA table_info(relay_deliveries)")}
+    if "attempts" in columns:
+        return
+    # SQLite cannot widen the state CHECK in place; rebuild the table and keep every row.
+    with db:
+        db.execute(DELIVERY_SCHEMA.replace("relay_deliveries", "relay_deliveries_v2"))
+        db.execute("INSERT INTO relay_deliveries_v2(event_id,sink,state,receipt) "
+                   "SELECT event_id,sink,state,receipt FROM relay_deliveries")
+        db.execute("DROP TABLE relay_deliveries")
+        db.execute("ALTER TABLE relay_deliveries_v2 RENAME TO relay_deliveries")
+
+
 def open_state(path, binding, *, read_only=False):
     if path.is_symlink() or path.is_junction() or (path.exists() and not stat.S_ISREG(path.stat().st_mode)):
         raise ValueError("Invalid state file")
@@ -92,22 +133,32 @@ def open_state(path, binding, *, read_only=False):
           if read_only else sqlite3.connect(path, timeout=5))
     try:
         if fresh:
-            db.executescript("""
-                CREATE TABLE relay_meta(binding TEXT NOT NULL);
-                CREATE TABLE relay_events(id TEXT PRIMARY KEY, envelope TEXT NOT NULL);
-                CREATE TABLE relay_deliveries(
-                    event_id TEXT NOT NULL REFERENCES relay_events(id), sink TEXT NOT NULL,
-                    state TEXT NOT NULL CHECK(state IN ('pending','unknown','accepted')),
-                    receipt TEXT, PRIMARY KEY(event_id,sink));
-            """)
+            db.executescript("CREATE TABLE relay_meta(binding TEXT NOT NULL);"
+                             "CREATE TABLE relay_events(id TEXT PRIMARY KEY, envelope TEXT NOT NULL);"
+                             + DELIVERY_SCHEMA)
             with db:
                 db.execute("INSERT INTO relay_meta VALUES (?)", (binding,))
-        if db.execute("SELECT binding FROM relay_meta").fetchall() != [(binding,)]:
+        if binding is not None and db.execute("SELECT binding FROM relay_meta").fetchall() != [(binding,)]:
             raise ValueError("State identity mismatch")
+        if not read_only:
+            migrate_state(db)
         return db
     except Exception:
         db.close()
         raise
+
+
+def dead_letters(db):
+    columns = {row[1] for row in db.execute("PRAGMA table_info(relay_deliveries)")}
+    if "attempts" not in columns:
+        # A pre-retry state file cannot hold dead letters; reading it stays side-effect free.
+        return []
+    rows = db.execute("SELECT event_id,sink,attempts,last_status FROM relay_deliveries "
+                      "WHERE state='dead_letter' ORDER BY event_id,sink LIMIT 101").fetchall()
+    if len(rows) > 100:
+        raise ValueError("Dead-letter limit exceeded")
+    return [{"event_id": identifier, "sink": sink, "attempts": attempts, "last_status": status}
+            for identifier, sink, attempts, status in rows]
 
 
 def utc_timestamp(value):
@@ -203,7 +254,9 @@ class Relay:
     def request(self, method, role, path, body=None):
         with self.client.stream(method, self.origins[role] + path, headers=self.headers, json=body,
                                 follow_redirects=False) as response:
-            if response.status_code != 200 or response.headers.get("content-encoding", "identity") != "identity":
+            if response.status_code != 200:
+                raise ResponseStatus(response.status_code)
+            if response.headers.get("content-encoding", "identity") != "identity":
                 raise ValueError("Unexpected response")
             raw = bytearray()
             for chunk in response.iter_raw():
@@ -219,7 +272,8 @@ class Relay:
         encoded = json.dumps(event, sort_keys=True, separators=(",", ":"))
         self.db.execute("INSERT OR IGNORE INTO relay_events VALUES (?,?)", (event["event_id"], encoded))
         for sink in SINKS:
-            self.db.execute("INSERT OR IGNORE INTO relay_deliveries VALUES (?,?,'pending',NULL)", (event["event_id"], sink))
+            self.db.execute("INSERT OR IGNORE INTO relay_deliveries(event_id,sink,state,receipt) "
+                            "VALUES (?,?,'pending',NULL)", (event["event_id"], sink))
 
     def collect_jobs(self):
         cursor = None
@@ -343,14 +397,22 @@ class Relay:
     def sweep(self):
         # Gate each type on its own fresh source authorization, including saved pending rows.
         allowed, failures = self.collect()
-        pending = self.db.execute("SELECT event_id,sink FROM relay_deliveries WHERE state='pending'").fetchall()
-        for identifier, sink in pending:
+        now = datetime.now(UTC)
+        due = self.db.execute("SELECT event_id,sink,attempts FROM relay_deliveries WHERE state='pending'").fetchall()
+        for identifier, sink, attempts, scheduled in self.db.execute(
+                "SELECT event_id,sink,attempts,next_attempt_at FROM relay_deliveries WHERE state='rejected'"):
+            if datetime.fromisoformat(scheduled) <= now:
+                due.append((identifier, sink, attempts))
+        for identifier, sink, attempts in due:
             event = json.loads(self.db.execute("SELECT envelope FROM relay_events WHERE id=?", (identifier,)).fetchone()[0])
             if event["event_type"] not in allowed:
                 continue
             with self.db:
-                claimed = self.db.execute("UPDATE relay_deliveries SET state='unknown' "
-                                          "WHERE event_id=? AND sink=? AND state='pending'", (identifier, sink)).rowcount
+                # Committed before the HTTP call: a crash stays ambiguous, never a silent success.
+                claimed = self.db.execute(
+                    "UPDATE relay_deliveries SET state='unknown',attempts=attempts+1,"
+                    "next_attempt_at=NULL,last_status=NULL WHERE event_id=? AND sink=? AND state IN ('pending','rejected')",
+                    (identifier, sink)).rowcount
             if not claimed:
                 continue
             try:
@@ -374,28 +436,52 @@ class Relay:
                 with self.db:
                     self.db.execute("UPDATE relay_deliveries SET state='accepted',receipt=? WHERE event_id=? AND sink=?",
                                     (remote_id, identifier, sink))
+            except ResponseStatus as failure:
+                if failure.status not in RECEIVER_REJECTIONS[sink]:
+                    continue  # Ambiguous (for example a proxy 502): never retried automatically.
+                attempts += 1
+                exhausted = attempts >= MAX_ATTEMPTS
+                with self.db:
+                    self.db.execute(
+                        "UPDATE relay_deliveries SET state=?,next_attempt_at=?,last_status=? WHERE event_id=? AND sink=?",
+                        ("dead_letter" if exhausted else "rejected",
+                         None if exhausted else utc_timestamp(now + timedelta(seconds=retry_delay(attempts))),
+                         str(failure.status), identifier, sink))
             except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
                 # Either sink may have committed before losing its response; never resend automatically.
                 continue
         counts = dict(self.db.execute("SELECT state,count(*) FROM relay_deliveries GROUP BY state").fetchall())
         return {**{state: counts.get(state, 0) for state in ("pending", "accepted", "unknown")},
+                **{state: counts[state] for state in ("rejected", "dead_letter") if counts.get(state)},
                 **({"source_errors": failures} if failures else {})}
 
 
 def main(argv=None):
     parser = Parser(description=__doc__)
     for role in SINKS:
-        parser.add_argument(f"--{role}-origin", required=True)
+        parser.add_argument(f"--{role}-origin")
     for role in SOURCE_TYPES:
         parser.add_argument(f"--{role}-origin")
-    parser.add_argument("--tenant-id", required=True)
-    parser.add_argument("--bot-id", required=True)
+    parser.add_argument("--tenant-id")
+    parser.add_argument("--bot-id")
     parser.add_argument("--state", required=True, type=Path)
     parser.add_argument("--interval", type=int, default=0)
     parser.add_argument("--reconcile", action="store_true")
     parser.add_argument("--eventpipe-query-origin")
+    parser.add_argument("--dead-letters", action="store_true")
     args = parser.parse_args(argv)
     try:
+        if args.dead_letters:
+            # Read-only operator listing: no origins, no bearer, no writes and never a replay.
+            if args.reconcile or args.eventpipe_query_origin or args.interval:
+                raise ValueError("Invalid dead-letter configuration")
+            with closing(open_state(args.state, None, read_only=True)) as db:
+                print(json.dumps(dead_letters(db)), flush=True)
+            return 0
+        if any(getattr(args, role + "_origin") is None for role in SINKS):
+            raise ValueError("Both sink origins are required")
+        if args.tenant_id is None or args.bot_id is None:
+            raise ValueError("Tenant and bot are required")
         origins = {role: origin(getattr(args, role + "_origin")) for role in (*SOURCE_TYPES, *SINKS)
                    if getattr(args, role + "_origin") is not None}
         if not set(SOURCE_TYPES) & origins.keys():
@@ -421,8 +507,10 @@ def main(argv=None):
             while True:
                 counts = relay.sweep()
                 print(json.dumps(counts), flush=True)
-                if counts["pending"] or counts["unknown"] or counts.get("source_errors"):
+                if (counts["pending"] or counts["unknown"] or counts.get("source_errors")
+                        or counts.get("dead_letter") or (counts.get("rejected") and not args.interval)):
                     return 1
+                # In interval mode a scheduled rejection is retried by a later sweep, not fatal.
                 if not args.interval:
                     return 0
                 time.sleep(args.interval)
